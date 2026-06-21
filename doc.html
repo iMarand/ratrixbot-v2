@@ -337,7 +337,10 @@
             <section id="compilation">
                 <h2>Compilation</h2>
                 <p>Ratrix Bot v2 (R-bot 2) is entirely self-contained. It only requires <code>g++</code> and the standard networking libraries to compile.</p>
+                <p>Windows (MSYS2) Compilation</p>
                 <pre><code>g++ derivbot.cpp -o derivbot.exe -std=c++17 -lssl -lcrypto -lws2_32 -lwsock32</code></pre>
+                <p>Linux Compilation</p>
+                <pre><code>g++ derivbot.cpp -o derivbot -std=c++17 -lssl -lcrypto -lboost_system</code></pre>
             </section>
 
             <section id="training">
