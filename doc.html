@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ratrix Bot v2 Documentation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --sidebar-bg: #1a1614;
+            --sidebar-text: #8c8582;
+            --sidebar-hover: #ffffff;
+            --sidebar-active-bg: #2d2623;
+            --sidebar-active-text: #e8cfc8;
+            --main-bg: #fdfcfb;
+            --text-main: #111111;
+            --text-muted: #666666;
+            --accent: #e55a50;
+            --border-color: #e5e5e5;
+            --code-bg: #f4f2f0;
+            --code-text: #e55a50;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--main-bg);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            line-height: 1.6;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background-color: var(--sidebar-bg);
+            color: var(--sidebar-text);
+            display: flex;
+            flex-direction: column;
+            padding: 24px 16px;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        .brand {
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: var(--accent);
+            margin-bottom: 32px;
+            padding-left: 12px;
+            letter-spacing: -0.5px;
+        }
+
+        .search-container {
+            position: relative;
+            margin-bottom: 32px;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 16px;
+            color: var(--sidebar-text);
+        }
+
+        .search-input {
+            width: 100%;
+            background-color: #2a2522;
+            border: 1px solid #3d3632;
+            border-radius: 6px;
+            padding: 10px 12px 10px 34px;
+            color: white;
+            font-size: 0.85rem;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+        }
+
+        .search-input::placeholder {
+            color: var(--sidebar-text);
+        }
+
+        .nav-group {
+            margin-bottom: 24px;
+        }
+
+        .nav-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+            padding-left: 12px;
+            color: #5a524e;
+        }
+
+        .nav-item {
+            display: block;
+            padding: 8px 12px;
+            color: var(--sidebar-text);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .nav-item:hover {
+            color: var(--sidebar-hover);
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .nav-item.active {
+            background-color: var(--sidebar-active-bg);
+            color: var(--sidebar-active-text);
+            border-radius: 6px;
+        }
+
+        .badge-new {
+            background-color: var(--accent);
+            color: white;
+            font-size: 0.6rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 48px 80px;
+            scroll-behavior: smooth;
+        }
+
+        .content-wrapper {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .breadcrumbs {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .breadcrumbs span {
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        h1 {
+            font-size: 2.75rem;
+            font-weight: 800;
+            letter-spacing: -1px;
+            margin-bottom: 16px;
+            color: #000;
+        }
+
+        h2 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-top: 48px;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+            letter-spacing: -0.5px;
+        }
+
+        h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-top: 32px;
+            margin-bottom: 12px;
+        }
+
+        p {
+            font-size: 1.05rem;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 24px 0;
+            font-size: 0.95rem;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px 16px;
+            background-color: #f0edea;
+            color: #111;
+            font-weight: 600;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-muted);
+        }
+        
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Code Blocks */
+        code {
+            font-family: 'Consolas', 'Monaco', monospace;
+            background-color: var(--code-bg);
+            color: var(--code-text);
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-weight: 500;
+        }
+
+        pre {
+            background-color: #1a1614;
+            color: #e8cfc8;
+            padding: 20px;
+            border-radius: 12px;
+            overflow-x: auto;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+        }
+
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+            font-weight: 400;
+        }
+
+        /* Alerts/Callouts */
+        .alert {
+            padding: 20px;
+            border-radius: 8px;
+            margin: 24px 0;
+            background-color: rgba(229, 90, 80, 0.05);
+        }
+
+        .alert strong {
+            display: block;
+            color: var(--accent);
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .alert p {
+            margin-bottom: 0;
+            font-size: 0.95rem;
+            color: #444;
+        }
+
+        /* Sections */
+        section {
+            padding-top: 40px;
+            margin-top: -40px; /* Offset for smooth scrolling */
+        }
+    </style>
+</head>
+<body>
+
+    <aside class="sidebar">
+        <div class="brand">Ratrix Bot v2</div>
+        
+        <div class="search-container">
+            <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="search-input" class="search-input" placeholder="Search docs...">
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-title">Getting Started</div>
+            <a href="#overview" class="nav-item active">Overview</a>
+            <a href="#compilation" class="nav-item">Compilation</a>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-title">Operations</div>
+            <a href="#training" class="nav-item">Training & RL <span class="badge-new">NEW</span></a>
+            <a href="#backtesting" class="nav-item">Backtesting</a>
+            <a href="#papertrading" class="nav-item">Paper Trading</a>
+            <a href="#results" class="nav-item">Results Management <span class="badge-new">NEW</span></a>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-title">Reference</div>
+            <a href="#flags" class="nav-item">All CLI Flags</a>
+            <a href="#workflows" class="nav-item">Best Workflows</a>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <div class="content-wrapper">
+            
+            <section id="overview">
+                <div class="breadcrumbs">Documentation &rsaquo; Getting Started &rsaquo; <span>Overview</span></div>
+                <h1>Ratrix Bot v2</h1>
+                <p>An advanced, self-learning, multi-indicator trading engine for Deriv synthetic indices. Built entirely in high-performance C++ using Reinforcement Learning (Q-Learning) and massive grid-search optimization.</p>
+                
+                <div class="alert">
+                    <strong>Disclaimer</strong>
+                    <p>Ratrix Bot v2 is built for paper trading and historical backtesting. Synthetic indices are RNG-generated. Always test out-of-sample before risking capital.</p>
+                </div>
+            </section>
+
+            <section id="compilation">
+                <h2>Compilation</h2>
+                <p>Ratrix Bot v2 (R-bot 2) is entirely self-contained. It only requires <code>g++</code> and the standard networking libraries to compile.</p>
+                <pre><code>g++ derivbot.cpp -o derivbot.exe -std=c++17 -lssl -lcrypto -lws2_32 -lwsock32</code></pre>
+            </section>
+
+            <section id="training">
+                <h2>Training & Reinforcement Learning</h2>
+                <p>The crown jewel of Ratrix Bot v2. The training engine downloads tick history, runs thousands of grid-search parameter combinations across 6 distinct strategies, and uses a Q-Learning meta-agent to figure out exactly which strategies perform best under current market regimes (Trend, Volatility, Momentum).</p>
+                
+                <h3>Continuous Learning Mode</h3>
+                <p>This command runs the training engine in an infinite loop. It will train, save the "brain", sleep for 5 minutes, and train again. Perfect for running on a VPS.</p>
+                <pre><code>./derivbot.exe --train --symbols jump10,jump25,v75 --autoadjust</code></pre>
+
+                <h3>Time-Boxed Training</h3>
+                <p>Limit the training loop to a specific number of hours.</p>
+                <pre><code>./derivbot.exe --train --symbols jump10 --autoadjust --train-hours 4</code></pre>
+            </section>
+
+            <section id="backtesting">
+                <h2>Backtesting</h2>
+                <p>Run isolated tests on specific historical windows to verify a strategy manually.</p>
+                
+                <h3>Standard Backtest</h3>
+                <p>Backtest the powerful Multi-Confluence strategy with 10,000 historical ticks.</p>
+                <pre><code>./derivbot.exe --mode backtest --symbol jump10 --strategy multi_confluence --count 10000</code></pre>
+
+                <h3>Load from Trained AI</h3>
+                <p>Instead of manually typing all the parameters, load the #1 best strategy perfectly from a previous training run.</p>
+                <pre><code>./derivbot.exe --mode backtest --symbol jump10 --load-run run_20260621_234305 --rank 1</code></pre>
+            </section>
+
+            <section id="papertrading">
+                <h2>Paper Trading</h2>
+                <p>Listen to the live WebSocket feed and execute trades virtually to track P&L in real-time.</p>
+                
+                <h3>Live Execution</h3>
+                <pre><code>./derivbot.exe --mode paper --symbol jump10 --load-run run_20260621_234305 --rank 1 --csv my_trades.csv</code></pre>
+
+                <h3>Cooldown Gate</h3>
+                <p>Prevent the bot from over-trading by setting a mandatory cooldown (in seconds) between signals.</p>
+                <pre><code>./derivbot.exe --mode paper --symbol v75 --strategy macd --cooldown 60</code></pre>
+            </section>
+
+            <section id="results">
+                <h2>Results Management</h2>
+                <p>Manage the massive amounts of data generated by the Training Engine.</p>
+                
+                <pre><code># View all completed training runs and the symbols they tested
+./derivbot.exe --list-runs
+
+# Delete a specific, outdated run to save disk space
+./derivbot.exe --delete-run run_20260621_234305
+
+# Wipe the slate clean and delete all runs
+./derivbot.exe --delete-all-runs</code></pre>
+            </section>
+
+            <section id="flags">
+                <h2>All CLI Flags</h2>
+                <p>A comprehensive list of every configuration flag available in Ratrix Bot v2.</p>
+                
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Flag</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>--mode &lt;mode&gt;</code></td>
+                            <td><code>backtest</code> | <code>paper</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>--train</code></td>
+                            <td>Enters training mode (bypasses <code>--mode</code>)</td>
+                        </tr>
+                        <tr>
+                            <td><code>--symbol &lt;sym&gt;</code></td>
+                            <td>The target market symbol (e.g., <code>jump10</code>, <code>v75</code>)</td>
+                        </tr>
+                        <tr>
+                            <td><code>--strategy &lt;name&gt;</code></td>
+                            <td><code>rsi</code> | <code>ema_cross</code> | <code>macd</code> | <code>bollinger</code> | <code>stochastic</code> | <code>multi_confluence</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>--duration &lt;sec&gt;</code></td>
+                            <td>Contract duration in seconds (15 or 30). Default: 15</td>
+                        </tr>
+                        <tr>
+                            <td><code>--stake &lt;amt&gt;</code></td>
+                            <td>Virtual stake size for P&L tracking. Default: 1.0</td>
+                        </tr>
+                        <tr>
+                            <td><code>--cooldown &lt;sec&gt;</code></td>
+                            <td>Minimum seconds between executing trades. Default: 0</td>
+                        </tr>
+                        <tr>
+                            <td><code>--load-run &lt;id&gt;</code></td>
+                            <td>Loads strategy parameters from a saved JSON run (e.g., <code>run_20260621_234305</code>)</td>
+                        </tr>
+                        <tr>
+                            <td><code>--rank &lt;n&gt;</code></td>
+                            <td>Loads the Nth best strategy when using <code>--load-run</code>. Default: 1</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Training Specific Flags</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Flag</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>--symbols &lt;list&gt;</code></td>
+                            <td>Comma separated list for batch training (e.g., <code>jump10,v75</code>)</td>
+                        </tr>
+                        <tr>
+                            <td><code>--all-symbols</code></td>
+                            <td>Trains the AI on every single active market Deriv offers.</td>
+                        </tr>
+                        <tr>
+                            <td><code>--autoadjust</code></td>
+                            <td>Enables the 5-minute continuous loop learning mode.</td>
+                        </tr>
+                        <tr>
+                            <td><code>--train-hours &lt;n&gt;</code></td>
+                            <td>Auto-stops the autoadjust loop after N hours.</td>
+                        </tr>
+                        <tr>
+                            <td><code>--top-k &lt;n&gt;</code></td>
+                            <td>How many top strategies to export to JSON. Default: 10</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section id="workflows">
+                <h2>Best Workflows</h2>
+                
+                <div class="alert">
+                    <strong>The Golden Loop</strong>
+                    <p>The most powerful way to use Ratrix Bot v2 is to let it optimize itself overnight.</p>
+                </div>
+                
+                <p><strong>Step 1: Set and Forget Training</strong><br>
+                Run this command before you go to sleep. It will continually adapt to the market all night.</p>
+                <pre><code>./derivbot.exe --train --symbols jump10,jump25,jump50,v75,v100 --autoadjust</code></pre>
+
+                <p><strong>Step 2: Review in the Morning</strong><br>
+                Wake up and see what the AI accomplished.</p>
+                <pre><code>./derivbot.exe --list-runs</code></pre>
+
+                <p><strong>Step 3: Deploy the Best Engine</strong><br>
+                Take the latest timestamped run ID, and deploy the #1 ranked strategy directly into the live paper trading feed.</p>
+                <pre><code>./derivbot.exe --mode paper --symbol jump10 --load-run run_20260622_080000 --rank 1</code></pre>
+            </section>
+
+            <br><br><br>
+        </div>
+    </main>
+
+    <script>
+        // Simple scroll spy for sidebar highlighting
+        const sections = document.querySelectorAll('section');
+        const navItems = document.querySelectorAll('.nav-item');
+
+        const observerOptions = {
+            root: null,
+            rootMargin: '0px',
+            threshold: 0.5
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const id = entry.target.getAttribute('id');
+                    navItems.forEach(item => {
+                        item.classList.remove('active');
+                        if (item.getAttribute('href') === `#${id}`) {
+                            item.classList.add('active');
+                        }
+                    });
+                }
+            });
+        }, observerOptions);
+
+        sections.forEach(section => observer.observe(section));
+
+        // Smooth scroll for nav items
+        navItems.forEach(item => {
+            item.addEventListener('click', function(e) {
+                e.preventDefault();
+                const targetId = this.getAttribute('href');
+                const targetSection = document.querySelector(targetId);
+                targetSection.scrollIntoView({ behavior: 'smooth' });
+            });
+        });
+
+        // Search functionality
+        const searchInput = document.getElementById('search-input');
+        searchInput.addEventListener('input', function(e) {
+            const term = e.target.value.toLowerCase();
+            const allSections = document.querySelectorAll('.content-wrapper section');
+            
+            allSections.forEach(section => {
+                if (section.textContent.toLowerCase().includes(term)) {
+                    section.style.display = 'block';
+                } else {
+                    section.style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
