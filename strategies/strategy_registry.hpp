@@ -87,11 +87,22 @@ namespace detail {
 
 class StrategyRegistry {
 public:
-    static std::vector<StrategyGridEntry> getAllGridEntries() {
+    static std::vector<StrategyGridEntry> getAllGridEntries(
+        const std::vector<std::string>& allowedStrategies = {},
+        const std::vector<double>& tradeDurations = {},
+        const std::vector<double>& candlePeriods = {}
+    ) {
         std::vector<StrategyGridEntry> entries;
+        
+        auto isAllowed = [&](const std::string& name) {
+            if (allowedStrategies.empty()) return true;
+            for (const auto& s : allowedStrategies) {
+                if (s == name) return true;
+            }
+            return false;
+        };
 
-        // 1. RSI threshold (existing strategy, wrapped)
-        {
+        if (isAllowed("rsi")) {
             StrategyGridEntry e;
             e.name = "rsi";
             e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
@@ -107,7 +118,7 @@ public:
         }
 
         // 2. EMA Crossover
-        {
+        if (isAllowed("ema_cross")) {
             StrategyGridEntry e;
             e.name = "ema_cross";
             e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
@@ -122,7 +133,7 @@ public:
         }
 
         // 3. MACD
-        {
+        if (isAllowed("macd")) {
             StrategyGridEntry e;
             e.name = "macd";
             e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
@@ -138,7 +149,7 @@ public:
         }
 
         // 4. Bollinger
-        {
+        if (isAllowed("bollinger")) {
             StrategyGridEntry e;
             e.name = "bollinger";
             e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
@@ -157,7 +168,7 @@ public:
         }
 
         // 5. Stochastic
-        {
+        if (isAllowed("stochastic")) {
             StrategyGridEntry e;
             e.name = "stochastic";
             e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
@@ -174,8 +185,8 @@ public:
             entries.push_back(std::move(e));
         }
 
-        // 6. Multi-Confluence (various indicator combos × agreement thresholds)
-        {
+        // 6. Multi-Confluence
+        if (isAllowed("multi_confluence")) {
             StrategyGridEntry e;
             e.name = "multi_confluence";
             e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
@@ -199,8 +210,6 @@ public:
                 return std::make_unique<MultiConfluenceStrategy>(cfg);
             };
 
-            // Selected useful indicator combinations (not exhaustive 2^5)
-            // mask bits: RSI=1, EMA=2, MACD=4, BB=8, Stoch=16
             std::vector<double> masks = {
                 0x07,  // RSI + EMA + MACD
                 0x09,  // RSI + BB
@@ -223,16 +232,20 @@ public:
             entries.push_back(std::move(e));
         }
 
-        // 7. Price Action (Multi-Timeframe)
-        {
+        // 7. Price Action
+        if (isAllowed("price_action")) {
             StrategyGridEntry e;
             e.name = "price_action";
             e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
                 return std::make_unique<PriceActionStrategy>((int)p.at("candle_period"));
             };
+            
+            std::vector<double> activeCandles = candlePeriods.empty() ? std::vector<double>{5, 10, 15, 30, 60} : candlePeriods;
+            std::vector<double> activeDurations = tradeDurations.empty() ? std::vector<double>{15, 30, 60} : tradeDurations;
+            
             e.paramCombinations = detail::cartesian({
-                {"candle_period", {5, 10, 15, 30, 60}},
-                {"trade_duration", {15, 30, 60}}
+                {"candle_period", activeCandles},
+                {"trade_duration", activeDurations}
             });
             entries.push_back(std::move(e));
         }
@@ -241,8 +254,12 @@ public:
     }
 
     // Get grid entries with TP/SL params injected for Forex & Gold
-    static std::vector<StrategyGridEntry> getForexGridEntries() {
-        auto entries = getAllGridEntries();
+    static std::vector<StrategyGridEntry> getForexGridEntries(
+        const std::vector<std::string>& allowedStrategies = {},
+        const std::vector<double>& tradeDurations = {},
+        const std::vector<double>& candlePeriods = {}
+    ) {
+        auto entries = getAllGridEntries(allowedStrategies, tradeDurations, candlePeriods);
         
         // For each strategy, multiply its param combos by TP/SL ranges
         std::vector<double> tpValues = {3, 5, 10, 15, 20};
@@ -268,9 +285,13 @@ public:
     }
     
     // Count total parameter combinations across all strategies
-    static int totalCombinations() {
+    static int totalCombinations(
+        const std::vector<std::string>& allowedStrategies = {},
+        const std::vector<double>& tradeDurations = {},
+        const std::vector<double>& candlePeriods = {}
+    ) {
         int total = 0;
-        for (auto& e : getAllGridEntries()) {
+        for (auto& e : getAllGridEntries(allowedStrategies, tradeDurations, candlePeriods)) {
             total += (int)e.paramCombinations.size();
         }
         return total;

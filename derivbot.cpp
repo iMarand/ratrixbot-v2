@@ -49,6 +49,27 @@
 #include <functional>
 #include <memory>
 #include <cstdint>
+#include <filesystem>
+#include <chrono>
+
+// Helper to parse comma-separated strings
+static std::vector<std::string> parseCsvString(const std::string& s) {
+    std::vector<std::string> result;
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        if (!item.empty()) result.push_back(item);
+    }
+    return result;
+}
+
+static std::vector<double> parseCsvDouble(const std::string& s) {
+    std::vector<double> result;
+    for (const auto& item : parseCsvString(s)) {
+        try { result.push_back(std::stod(item)); } catch (...) {}
+    }
+    return result;
+}
 
 namespace beast     = boost::beast;
 namespace http      = beast::http;
@@ -869,7 +890,12 @@ static void printUsage() {
         "  --train-hours <n>       Auto-stop training after N hours (default: unlimited)\n"
         "  --top-k <n>             Keep top N strategies per symbol (default: 10)\n"
         "  --train-test-split <pct> Train/test split ratio (default: 0.8)\n"
-        "  --results-dir <path>    Output directory for results (default: results/)\n\n"
+        "  --results-dir <path>    Output directory for results (default: results/)\n"
+        "  --train-history <n>     Number of ticks to fetch for training (default 50000)\n"
+        "  --strategies <list>     Comma-separated list of strategies to test (default all)\n"
+        "  --durations <list>      Comma-separated trade durations (default 15,30,60)\n"
+        "  --candles <list>        Comma-separated candle periods (default 5,10,15,30,60)\n"
+        "  --no-rl                 Skip RL Meta-Learner phase entirely\n\n"
         "Results Management:\n"
         "  --list-runs             List all finished training runs\n"
         "  --delete-run <id>       Delete a specific run\n"
@@ -894,6 +920,13 @@ int main(int argc, char** argv) {
     double trainHours = 0.0, trainSplit = 0.8;
     int topK = 10;
     std::string resultsDir = "results";
+    
+    // Advanced training flags
+    int trainHistory = 50000;
+    std::string allowedStrategiesStr;
+    std::string durationsStr;
+    std::string candlesStr;
+    bool skipRL = false;
 
     std::string loadRunId, deleteRunId;
     int rank = 1;
@@ -935,6 +968,11 @@ int main(int argc, char** argv) {
         else if (arg == "--top-k") topK = std::stoi(next());
         else if (arg == "--train-test-split") trainSplit = std::stod(next());
         else if (arg == "--results-dir") resultsDir = next();
+        else if (arg == "--train-history") trainHistory = std::stoi(next());
+        else if (arg == "--strategies") allowedStrategiesStr = next();
+        else if (arg == "--durations") durationsStr = next();
+        else if (arg == "--candles") candlesStr = next();
+        else if (arg == "--no-rl") skipRL = true;
         else if (arg == "--list-runs") { mode = "list-runs"; }
         else if (arg == "--delete-run") { mode = "delete-run"; deleteRunId = next(); }
         else if (arg == "--delete-all-runs") { mode = "delete-all-runs"; }
@@ -1000,8 +1038,20 @@ int main(int argc, char** argv) {
     }
 
     if (mode == "train") {
+        std::vector<std::string> targets;
+        if (allSymbols) {
+            std::vector<ActiveSymbolInfo> symbols;
+            if (!fetchActiveSymbols(client, symbols)) return 1;
+            for (auto& s : symbols) targets.push_back(s.symbol);
+        } else {
+            for (auto& s : parseCsvString(symbolsList)) {
+                targets.push_back(resolveSymbol(s));
+            }
+        }
+
         TrainConfig tCfg;
-        tCfg.historyCount = count;
+        tCfg.symbols = targets;
+        tCfg.historyCount = trainHistory;
         tCfg.topK = topK;
         tCfg.trainSplit = trainSplit;
         tCfg.durationSec = duration;
@@ -1013,6 +1063,11 @@ int main(int argc, char** argv) {
         tCfg.trainHours = trainHours;
         tCfg.seedRunId = seedRunId;
         tCfg.seedRank = seedRank;
+        
+        if (!allowedStrategiesStr.empty()) tCfg.allowedStrategies = parseCsvString(allowedStrategiesStr);
+        if (!durationsStr.empty()) tCfg.durations = parseCsvDouble(durationsStr);
+        if (!candlesStr.empty()) tCfg.candlePeriods = parseCsvDouble(candlesStr);
+        tCfg.skipRL = skipRL;
 
         std::string runDir = ReportGenerator::createResultsDir(tCfg.resultsDir);
         std::cout << "Results will be saved to: " << runDir << "\n";

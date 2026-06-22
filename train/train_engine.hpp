@@ -37,6 +37,12 @@ struct TrainConfig {
     // Seed training: continue from a previous good run
     std::string seedRunId;
     int         seedRank = 0; // 0 = no seed
+    
+    // Advanced filtering
+    std::vector<std::string> allowedStrategies;
+    std::vector<double>      durations;
+    std::vector<double>      candlePeriods;
+    bool        skipRL       = false;
 };
 
 class TrainEngine {
@@ -87,8 +93,8 @@ private:
         
         GridSearchEngine gs(gsCfg);
         auto allGrid = isForexOrCommodity(symbol) 
-            ? StrategyRegistry::getForexGridEntries() 
-            : StrategyRegistry::getAllGridEntries();
+            ? StrategyRegistry::getForexGridEntries(cfg_.allowedStrategies, cfg_.durations, cfg_.candlePeriods) 
+            : StrategyRegistry::getAllGridEntries(cfg_.allowedStrategies, cfg_.durations, cfg_.candlePeriods);
         
         // If seeding, inject the seed strategy's params + neighbors into the grid
         if (cfg_.seedRank > 0 && !cfg_.seedRunId.empty()) {
@@ -102,7 +108,7 @@ private:
             return;
         }
 
-        // Phase 2: RL Meta-Learner Training
+        // Prepare factories for Phase 2
         std::vector<std::function<std::unique_ptr<StrategyBase>()>> topFactories;
         for (const auto& res : topGrid) {
             for (const auto& entry : allGrid) {
@@ -114,25 +120,39 @@ private:
             }
         }
 
-        RLTrainConfig rlCfg;
-        rlCfg.durationSec = cfg_.durationSec;
-        rlCfg.stake = cfg_.stake;
-        rlCfg.payoutPct = cfg_.payoutPct;
-        rlCfg.trainEpochs = 3;
+        RLTrainResult rlRes;
         
-        std::cout << "\nTraining RL agent on top " << topFactories.size() << " strategies...\n";
-        RLTrainer rl(topFactories, rlCfg);
-        
-        // If seeding, load the previous Q-table so the RL agent continues learning
-        if (cfg_.seedRank > 0 && !cfg_.seedRunId.empty()) {
-            std::string seedQPath = cfg_.resultsDir + "/" + cfg_.seedRunId + "/" + symbol + "/qtable.json";
-            if (std::filesystem::exists(seedQPath)) {
-                rl.agent().load(seedQPath);
-                std::cout << "  Loaded seed Q-table from " << cfg_.seedRunId << "\n";
+        // Phase 2: RL Meta-Learner Training
+        if (cfg_.skipRL) {
+            std::cout << "\n--- Skipping RL Meta-Learner Phase (--no-rl) ---\n";
+            rlRes.netPnl = 0.0;
+        } else {
+            RLTrainConfig rlCfg;
+            rlCfg.durationSec = cfg_.durationSec;
+            rlCfg.stake = cfg_.stake;
+            rlCfg.payoutPct = cfg_.payoutPct;
+            rlCfg.trainEpochs = 3;
+            
+            std::cout << "\nTraining RL agent on top " << topFactories.size() << " strategies...\n";
+            RLTrainer rl(topFactories, rlCfg);
+            
+            // If seeding, load the previous Q-table so the RL agent continues learning
+            if (cfg_.seedRank > 0 && !cfg_.seedRunId.empty()) {
+                std::string seedQPath = cfg_.resultsDir + "/" + cfg_.seedRunId + "/" + symbol + "/qtable.json";
+                if (std::filesystem::exists(seedQPath)) {
+                    rl.agent().load(seedQPath);
+                    std::cout << "  Loaded seed Q-table from " << cfg_.seedRunId << "\n";
+                }
             }
+            
+            rlRes = rl.train(trainTimes, trainPrices);
+            
+            // Save Q-Table
+            std::string symbolDir = runDir + "/" + symbol;
+            std::filesystem::create_directories(symbolDir);
+            std::string qTablePath = symbolDir + "/qtable.json";
+            rl.agent().save(qTablePath);
         }
-        
-        RLTrainResult rlRes = rl.train(trainTimes, trainPrices);
 
         // Save Results
         std::string symbolDir = runDir + "/" + symbol;
@@ -142,9 +162,6 @@ private:
         std::string jsonPath = symbolDir + "/summary.json";
         ReportGenerator::writeSummaryFiles(summaryPath, jsonPath, symbol, topGrid, rlRes);
         ReportGenerator::printConsoleSummary(symbol, topGrid, rlRes);
-        
-        std::string qTablePath = symbolDir + "/qtable.json";
-        rl.agent().save(qTablePath);
     }
     
     // Load seed strategy params from a previous run and add neighbor variations

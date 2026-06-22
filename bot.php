@@ -118,6 +118,15 @@ if (isset($_GET['action'])) {
                 $cmd .= " --autoadjust";
             }
             
+            // Advanced parameters
+            if (!empty($_POST['history'])) $cmd .= " --train-history " . (int)$_POST['history'];
+            if (!empty($_POST['strategies'])) $cmd .= " --strategies " . escapeshellarg($_POST['strategies']);
+            if (!empty($_POST['durations'])) $cmd .= " --durations " . escapeshellarg($_POST['durations']);
+            if (!empty($_POST['candles'])) $cmd .= " --candles " . escapeshellarg($_POST['candles']);
+            if (isset($_POST['no_rl']) && $_POST['no_rl'] == 'true') {
+                $cmd .= " --no-rl";
+            }
+            
             // clear old log
             if(file_exists($log_file)) unlink($log_file);
             
@@ -180,6 +189,24 @@ if (isset($_GET['action'])) {
         $output = shell_exec($cmd . " 2>&1");
         
         echo json_encode(["output" => $output]);
+        exit;
+    }
+    
+    if ($action === 'delete_run') {
+        $run_id = $_POST['run_id'] ?? '';
+        if (!$run_id) { echo json_encode(["error" => "No run_id provided"]); exit; }
+        
+        // Delete from DB
+        $stmt = $db->prepare("DELETE FROM runs WHERE run_id = ?");
+        $stmt->execute([$run_id]);
+        
+        // Delete from filesystem
+        $run_dir = $results_dir . '/' . basename($run_id);
+        if (is_dir($run_dir)) {
+            shell_exec("rm -rf " . escapeshellarg($run_dir));
+        }
+        
+        echo json_encode(["success" => true]);
         exit;
     }
     
@@ -410,6 +437,10 @@ if (isset($_GET['action'])) {
                                 <option value="forex">Forex / Gold</option>
                             </select>
                         </div>
+                        <div class="form-group flex-1">
+                            <label>Historical Ticks to Fetch</label>
+                            <input type="number" id="train-history" value="50000" step="1000">
+                        </div>
                     </div>
                     
                     <div id="forex-options" style="display:none; background: #f9f9f9; padding: 16px; border-radius: 6px; margin-bottom: 16px;">
@@ -429,6 +460,42 @@ if (isset($_GET['action'])) {
                         </div>
                     </div>
                     
+                    <h2>Advanced Search Constraints</h2>
+                    <div style="background: #fafafa; border: 1px solid var(--border-color); padding: 16px; border-radius: 6px; margin-bottom: 16px;">
+                        <div class="form-group">
+                            <label>Allowed Strategies (Check to include. Empty means ALL)</label>
+                            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="rsi"> RSI</label>
+                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="ema_cross"> EMA Cross</label>
+                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="macd"> MACD</label>
+                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="bollinger"> Bollinger</label>
+                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="stochastic"> Stochastic</label>
+                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="multi_confluence"> Confluence</label>
+                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="price_action"> Price Action</label>
+                            </div>
+                        </div>
+                        
+                        <div class="flex-row">
+                            <div class="form-group flex-1">
+                                <label>Trade Durations (Synthetics)</label>
+                                <div style="display: flex; gap: 12px;">
+                                    <label style="font-weight: normal;"><input type="checkbox" class="dur-cb" value="15" checked> 15s</label>
+                                    <label style="font-weight: normal;"><input type="checkbox" class="dur-cb" value="30"> 30s</label>
+                                    <label style="font-weight: normal;"><input type="checkbox" class="dur-cb" value="60"> 1m</label>
+                                </div>
+                            </div>
+                            <div class="form-group flex-1">
+                                <label>Candle Periods (Price Action)</label>
+                                <div style="display: flex; gap: 12px;">
+                                    <label style="font-weight: normal;"><input type="checkbox" class="can-cb" value="5"> 5s</label>
+                                    <label style="font-weight: normal;"><input type="checkbox" class="can-cb" value="10"> 10s</label>
+                                    <label style="font-weight: normal;"><input type="checkbox" class="can-cb" value="15" checked> 15s</label>
+                                    <label style="font-weight: normal;"><input type="checkbox" class="can-cb" value="30"> 30s</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <h2>Seed Parameters (Optional)</h2>
                     <div class="flex-row">
                         <div class="form-group flex-1">
@@ -441,9 +508,12 @@ if (isset($_GET['action'])) {
                         </div>
                     </div>
                     
-                    <div class="form-group" style="margin-top: 16px;">
+                    <div class="form-group" style="margin-top: 16px; display: flex; gap: 24px; background: #eef2ff; padding: 12px; border-radius: 6px;">
                         <label>
-                            <input type="checkbox" id="train-autoadjust" checked> Auto-adjust capabilities
+                            <input type="checkbox" id="train-autoadjust" checked> Run continuous background learning (--autoadjust)
+                        </label>
+                        <label>
+                            <input type="checkbox" id="train-rl" checked> Execute Phase 2 RL/Q-Learning Meta-Learner
                         </label>
                     </div>
                     
@@ -627,10 +697,23 @@ if (isset($_GET['action'])) {
             const seedRun = document.getElementById('train-seed-run').value;
             const seedRank = document.getElementById('train-seed-rank').value;
             const autoadjust = document.getElementById('train-autoadjust').checked;
+            const rlEnabled = document.getElementById('train-rl').checked;
+            const history = document.getElementById('train-history').value;
+            
+            // Get checkboxes
+            const strats = Array.from(document.querySelectorAll('.strat-cb:checked')).map(cb => cb.value).join(',');
+            const durs = Array.from(document.querySelectorAll('.dur-cb:checked')).map(cb => cb.value).join(',');
+            const cans = Array.from(document.querySelectorAll('.can-cb:checked')).map(cb => cb.value).join(',');
             
             let formData = new FormData();
             formData.append('symbol', symbol);
             formData.append('autoadjust', autoadjust);
+            formData.append('no_rl', !rlEnabled);
+            if (history) formData.append('history', history);
+            if (strats) formData.append('strategies', strats);
+            if (durs) formData.append('durations', durs);
+            if (cans) formData.append('candles', cans);
+            
             if (seedRun) {
                 formData.append('seed_run', seedRun);
                 formData.append('seed_rank', seedRank);
@@ -688,6 +771,7 @@ if (isset($_GET['action'])) {
                         <td>
                             <button onclick="viewChart('${r.run_id}', '${r.symbol}')" style="padding:4px 8px; font-size:0.8rem;">Chart</button>
                             <button onclick="exploreRanks('${r.run_id}', '${r.symbol}')" style="padding:4px 8px; font-size:0.8rem; margin-left: 4px; background: #2563eb;">Explore Ranks</button>
+                            <button onclick="deleteRun('${r.run_id}')" style="padding:4px 8px; font-size:0.8rem; margin-left: 4px; background: #dc2626;">Delete</button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -790,6 +874,24 @@ if (isset($_GET['action'])) {
             } catch(e) {
                 outDiv.textContent = "Failed to execute backtest. " + e.message;
             }
+        }
+
+        async function deleteRun(runId) {
+            if (!confirm('Are you sure you want to permanently delete run ' + runId + '?')) return;
+            
+            let formData = new FormData();
+            formData.append('run_id', runId);
+            
+            try {
+                const res = await fetch('?action=delete_run', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    loadResults();
+                    loadDashboardChart();
+                } else {
+                    alert('Error deleting run: ' + data.error);
+                }
+            } catch(e) { alert('Failed to delete run.'); }
         }
 
         // Init
