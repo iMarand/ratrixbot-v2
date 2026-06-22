@@ -45,6 +45,7 @@ struct TrainConfig {
     bool        skipRL       = false;
     double      baseTp       = 0.0;
     double      baseSl       = 0.0;
+    double      spreadPips   = 0.0;
 };
 
 class TrainEngine {

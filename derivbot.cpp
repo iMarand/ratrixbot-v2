@@ -437,6 +437,7 @@ BacktestResult runBacktest(const BacktestConfig& cfg,
             double tpDist = cfg.tpPips * pipSize;
             double slDist = cfg.slPips * pipSize;
             double spreadDist = cfg.spreadPips * pipSize;
+            double dollarPerPip = cfg.lotSize * 10.0;
             
             if (slDist <= spreadDist) {
                 t.exitTime = entryTime;

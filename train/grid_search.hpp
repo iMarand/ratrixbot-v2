@@ -120,7 +120,6 @@ public:
                     won = false;
                     pnl = -(slPips * dollarPerPip);
                     res.totalTrades++;
-                    res.losses++;
                     equity += pnl;
                     peak = std::max(peak, equity);
                     maxDD = std::min(maxDD, equity - peak);
