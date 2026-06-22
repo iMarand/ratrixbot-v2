@@ -428,7 +428,32 @@ if (isset($_GET['action'])) {
                     <div class="flex-row">
                         <div class="form-group flex-1">
                             <label>Market / Symbol</label>
-                            <input type="text" id="train-symbol" value="jump10" required>
+                            <select id="train-symbol" onchange="onSymbolChange()">
+                                <optgroup label="Synthetic Indices">
+                                    <option value="jump10" selected>Jump 10 (JD10)</option>
+                                    <option value="jump25">Jump 25 (JD25)</option>
+                                    <option value="jump50">Jump 50 (JD50)</option>
+                                    <option value="jump75">Jump 75 (JD75)</option>
+                                    <option value="jump100">Jump 100 (JD100)</option>
+                                    <option value="v10">Volatility 10 (R_10)</option>
+                                    <option value="v25">Volatility 25 (R_25)</option>
+                                    <option value="v50">Volatility 50 (R_50)</option>
+                                    <option value="v75">Volatility 75 (R_75)</option>
+                                    <option value="v100">Volatility 100 (R_100)</option>
+                                    <option value="boom1000">Boom 1000</option>
+                                    <option value="crash1000">Crash 1000</option>
+                                    <option value="boom500">Boom 500</option>
+                                    <option value="crash500">Crash 500</option>
+                                </optgroup>
+                                <optgroup label="Forex / Gold">
+                                    <option value="eurusd">EUR/USD</option>
+                                    <option value="gbpusd">GBP/USD</option>
+                                    <option value="usdjpy">USD/JPY</option>
+                                    <option value="gold">Gold (XAU/USD)</option>
+                                    <option value="gbpjpy">GBP/JPY</option>
+                                    <option value="audusd">AUD/USD</option>
+                                </optgroup>
+                            </select>
                         </div>
                         <div class="form-group flex-1">
                             <label>Market Type</label>
@@ -472,6 +497,7 @@ if (isset($_GET['action'])) {
                                 <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="stochastic"> Stochastic</label>
                                 <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="multi_confluence"> Confluence</label>
                                 <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="price_action"> Price Action</label>
+                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="candle_tree"> Candle Decision Tree</label>
                             </div>
                         </div>
                         
@@ -576,6 +602,7 @@ if (isset($_GET['action'])) {
                         <tr style="background: #f1f1f1;">
                             <th>Rank</th>
                             <th>Strategy</th>
+                            <th>Duration</th>
                             <th>Win Rate</th>
                             <th>Net P&L</th>
                             <th>Max Drawdown</th>
@@ -670,6 +697,18 @@ if (isset($_GET['action'])) {
         function toggleMarketType() {
             const isForex = document.getElementById('train-market-type').value === 'forex';
             document.getElementById('forex-options').style.display = isForex ? 'block' : 'none';
+        }
+
+        function onSymbolChange() {
+            const sym = document.getElementById('train-symbol').value;
+            const forexSymbols = ['eurusd', 'gbpusd', 'usdjpy', 'gold', 'gbpjpy', 'audusd'];
+            const marketType = document.getElementById('train-market-type');
+            if (forexSymbols.includes(sym)) {
+                marketType.value = 'forex';
+            } else {
+                marketType.value = 'synthetic';
+            }
+            toggleMarketType();
         }
 
         async function checkStatus() {
@@ -832,7 +871,7 @@ if (isset($_GET['action'])) {
             document.getElementById('rank-explorer-card').style.display = 'block';
             document.getElementById('rank-explorer-title').textContent = `Top Strategies: ${runId} - ${symbol}`;
             const tbody = document.getElementById('rank-explorer-body');
-            tbody.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8">Loading...</td></tr>';
             
             try {
                 const res = await fetch(`?action=get_run_details&run_id=${runId}&symbol=${symbol}`);
@@ -840,9 +879,13 @@ if (isset($_GET['action'])) {
                 
                 tbody.innerHTML = '';
                 data.strategies.forEach(s => {
-                    // Format parameters nicely
+                    // Extract duration from params or show default
+                    let duration = s.params.trade_duration ? s.params.trade_duration + 's' : '15s';
+                    
+                    // Format parameters nicely (exclude trade_duration since it has its own column)
                     let paramsStr = '';
                     for (const [key, value] of Object.entries(s.params)) {
+                        if (key === 'trade_duration') continue;
                         paramsStr += `<span style="background: #eef2ff; color: #4f46e5; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-right: 4px; display: inline-block; margin-bottom: 4px;">${key}: ${value}</span>`;
                     }
                     
@@ -850,6 +893,7 @@ if (isset($_GET['action'])) {
                     tr.innerHTML = `
                         <td><strong>#${s.rank}</strong></td>
                         <td>${s.strategyName}</td>
+                        <td><span style="background: #f0fdf4; color: #166534; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem;">${duration}</span></td>
                         <td>${parseFloat(s.winRatePct).toFixed(1)}%</td>
                         <td>${formatMoney(s.netPnl)}</td>
                         <td>${formatMoney(s.maxDrawdown)}</td>
@@ -861,7 +905,7 @@ if (isset($_GET['action'])) {
                     tbody.appendChild(tr);
                 });
             } catch (e) {
-                tbody.innerHTML = '<tr><td colspan="7" style="color:red;">Failed to load ranks.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="color:red;">Failed to load ranks.</td></tr>';
             }
         }
 

@@ -6,6 +6,7 @@
 #include "stochastic_strategy.hpp"
 #include "multi_confluence.hpp"
 #include "price_action_strategy.hpp"
+#include "candle_decision_tree.hpp"
 #include "../rsi.hpp"
 #include <vector>
 #include <functional>
@@ -245,6 +246,30 @@ public:
             
             e.paramCombinations = detail::cartesian({
                 {"candle_period", activeCandles},
+                {"trade_duration", activeDurations}
+            });
+            entries.push_back(std::move(e));
+        }
+
+        // 8. Candle Decision Tree
+        if (isAllowed("candle_tree")) {
+            StrategyGridEntry e;
+            e.name = "candle_tree";
+            e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
+                int cp = (int)p.at("candle_period");
+                int md = (int)p.at("max_depth");
+                int ms = (int)p.at("min_samples");
+                int td = p.count("trade_duration") ? (int)p.at("trade_duration") : 15;
+                return std::make_unique<CandleDecisionTreeStrategy>(cp, md, ms, td);
+            };
+            
+            std::vector<double> activeCandles = candlePeriods.empty() ? std::vector<double>{5, 10, 15, 30} : candlePeriods;
+            std::vector<double> activeDurations = tradeDurations.empty() ? std::vector<double>{15, 30, 60} : tradeDurations;
+            
+            e.paramCombinations = detail::cartesian({
+                {"candle_period", activeCandles},
+                {"max_depth", {2, 3, 4}},
+                {"min_samples", {5, 10}},
                 {"trade_duration", activeDurations}
             });
             entries.push_back(std::move(e));

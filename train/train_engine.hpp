@@ -154,6 +154,83 @@ private:
             rl.agent().save(qTablePath);
         }
 
+        // Phase 3: Parameter Refinement (hill-climbing on Rank 1)
+        if (!topGrid.empty() && topGrid[0].netPnl > 0) {
+            std::cout << "\n--- Phase 3: Parameter Refinement ---\n";
+            
+            // Find the matching grid entry for the rank 1 strategy
+            const GridSearchResult& best = topGrid[0];
+            StrategyGridEntry* bestEntry = nullptr;
+            for (auto& entry : allGrid) {
+                if (entry.name == best.strategyName) {
+                    bestEntry = &entry;
+                    break;
+                }
+            }
+            
+            if (bestEntry) {
+                GridSearchResult currentBest = best;
+                
+                for (int round = 0; round < 3; round++) {
+                    bool improved = false;
+                    
+                    for (auto& [paramName, baseVal] : currentBest.params) {
+                        if (paramName == "trade_duration" || paramName == "candle_period") continue;
+                        
+                        // Try perturbations: ±5% and ±10%
+                        std::vector<double> deltas = {-0.10, -0.05, 0.05, 0.10};
+                        for (double delta : deltas) {
+                            ParamSet testParams = currentBest.params;
+                            double newVal = baseVal * (1.0 + delta);
+                            
+                            // For integer params, round and skip if same
+                            if (paramName == "period" || paramName == "fast" || paramName == "slow" ||
+                                paramName == "signal" || paramName == "k_period" || paramName == "d_period" ||
+                                paramName == "bb_period" || paramName == "rsi_period" ||
+                                paramName == "min_agree" || paramName == "mask" ||
+                                paramName == "max_depth" || paramName == "min_samples") {
+                                newVal = std::round(newVal);
+                                if (newVal == baseVal || newVal < 1) continue;
+                            }
+                            
+                            testParams[paramName] = newVal;
+                            
+                            GridSearchResult candidate = gs.evaluate(*bestEntry, testParams, trainTimes, trainPrices);
+                            
+                            if (candidate.score > currentBest.score) {
+                                std::cout << "  Improved! " << paramName << ": " 
+                                          << baseVal << " → " << newVal
+                                          << " (score: " << currentBest.score << " → " << candidate.score << ")\n";
+                                currentBest = candidate;
+                                improved = true;
+                            }
+                        }
+                    }
+                    
+                    if (!improved) {
+                        std::cout << "  Round " << (round + 1) << ": no improvement. Stopping refinement.\n";
+                        break;
+                    } else {
+                        std::cout << "  Round " << (round + 1) << " complete. New best score: " << currentBest.score << "\n";
+                    }
+                }
+                
+                // If refinement improved, update rank 1
+                if (currentBest.score > topGrid[0].score) {
+                    std::cout << "  Refinement improved Rank 1: score " << topGrid[0].score 
+                              << " → " << currentBest.score << "\n";
+                    topGrid[0] = currentBest;
+                    
+                    // Re-sort to maintain ranking
+                    std::sort(topGrid.begin(), topGrid.end(), [](const GridSearchResult& a, const GridSearchResult& b) {
+                        return a.score > b.score;
+                    });
+                } else {
+                    std::cout << "  Refinement did not improve Rank 1.\n";
+                }
+            }
+        }
+
         // Save Results
         std::string symbolDir = runDir + "/" + symbol;
         std::filesystem::create_directories(symbolDir);

@@ -68,7 +68,7 @@ public:
             std::optional<MarketState> prevState;
 
             for (size_t i = 0; i < n; i++) {
-                auto state = features.update(prices[i]);
+                auto state = features.update(prices[i], times[i]);
                 if (!state.has_value()) {
                     // Still warming up indicators — feed all strategies to keep them in sync
                     for (auto& s : strategies) s->onPrice(times[i], prices[i]);
