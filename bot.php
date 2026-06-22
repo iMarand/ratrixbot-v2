@@ -183,10 +183,18 @@ if (isset($_GET['action'])) {
     if ($action === 'run_backtest') {
         $run_id = escapeshellarg($_GET['run_id'] ?? '');
         $symbol = escapeshellarg($_GET['symbol'] ?? '');
+        $trained_on = escapeshellarg($_GET['trained_on'] ?? '');
         $rank = (int)($_GET['rank'] ?? 1);
         $count = (int)($_GET['count'] ?? 5000);
         
+        // Use the new `--load-run` semantics: if --trained-on is not provided, it assumes symbol. 
+        // We will pass the symbol it was trained on if it's different.
         $cmd = "./derivbot --mode backtest --symbol $symbol --load-run $run_id --rank $rank --count $count";
+        // To allow testing on a different symbol than it was trained on, we need a way to tell derivbot where to find the summary.json.
+        // I will add `--trained-on $trained_on` to the command line.
+        if ($_GET['trained_on'] ?? '') {
+            $cmd .= " --trained-on " . $trained_on;
+        }
         $output = shell_exec($cmd . " 2>&1");
         
         echo json_encode(["output" => $output]);
@@ -570,8 +578,37 @@ if (isset($_GET['action'])) {
                     <button onclick="document.getElementById('backtest-card').style.display = 'none'" style="background: #ccc; color: #333;">Close</button>
                 </div>
                 
-                <div id="backtest-config" style="background: #fafafa; border: 1px solid var(--border-color); padding: 16px; border-radius: 6px; margin-bottom: 16px; display: flex; gap: 16px; align-items: center;">
-                    <div style="flex: 1;">
+                <div id="backtest-config" style="background: #fafafa; border: 1px solid var(--border-color); padding: 16px; border-radius: 6px; margin-bottom: 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 200px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500;">Test Symbol</label>
+                        <select id="backtest-symbol-select" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: white;">
+                            <optgroup label="Synthetic Indices">
+                                <option value="jump10">Jump 10 (JD10)</option>
+                                <option value="jump25">Jump 25 (JD25)</option>
+                                <option value="jump50">Jump 50 (JD50)</option>
+                                <option value="jump75">Jump 75 (JD75)</option>
+                                <option value="jump100">Jump 100 (JD100)</option>
+                                <option value="v10">Volatility 10 (R_10)</option>
+                                <option value="v25">Volatility 25 (R_25)</option>
+                                <option value="v50">Volatility 50 (R_50)</option>
+                                <option value="v75">Volatility 75 (R_75)</option>
+                                <option value="v100">Volatility 100 (R_100)</option>
+                                <option value="boom1000">Boom 1000</option>
+                                <option value="crash1000">Crash 1000</option>
+                                <option value="boom500">Boom 500</option>
+                                <option value="crash500">Crash 500</option>
+                            </optgroup>
+                            <optgroup label="Forex / Gold">
+                                <option value="eurusd">EUR/USD</option>
+                                <option value="gbpusd">GBP/USD</option>
+                                <option value="usdjpy">USD/JPY</option>
+                                <option value="gold">Gold (XAU/USD)</option>
+                                <option value="gbpjpy">GBP/JPY</option>
+                                <option value="audusd">AUD/USD</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div style="flex: 1; min-width: 200px;">
                         <label style="display: block; margin-bottom: 8px; font-weight: 500;">History Length</label>
                         <select id="backtest-ticks-select" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: white;">
                             <option value="5000">5,000 Ticks</option>
@@ -935,24 +972,33 @@ if (isset($_GET['action'])) {
             currentBacktestSymbol = symbol;
             currentBacktestRank = rank;
             
+            // Set the symbol dropdown to the originally trained symbol
+            document.getElementById('backtest-symbol-select').value = symbol;
+            
             const card = document.getElementById('backtest-card');
             const outDiv = document.getElementById('backtest-output');
             
             card.style.display = 'block';
-            outDiv.innerHTML = `<span style="color: #666;">Ready to backtest ${symbol} using ${runId} (Rank ${rank}). Select history length and click Start.</span>`;
+            outDiv.innerHTML = `<span style="color: #666;">Ready to test parameters from ${runId} (Rank ${rank}). Select symbol and history length, then click Start.</span>`;
             
             card.scrollIntoView({ behavior: 'smooth' });
         }
 
         async function executeConfiguredBacktest() {
             const count = document.getElementById('backtest-ticks-select').value;
+            const targetSymbol = document.getElementById('backtest-symbol-select').value;
             const outDiv = document.getElementById('backtest-output');
             
-            outDiv.innerHTML = `<span style="color: #666;">Fetching ${count} ticks and running backtest for ${currentBacktestSymbol}... Please wait...</span>`;
+            outDiv.innerHTML = `<span style="color: #666;">Fetching ${count} ticks and running backtest on ${targetSymbol}... Please wait...</span>`;
             outDiv.scrollTop = 0;
             
             try {
-                const res = await fetch(`?action=run_backtest&run_id=${currentBacktestRunId}&symbol=${currentBacktestSymbol}&rank=${currentBacktestRank}&count=${count}`);
+                // Pass targetSymbol to the API, but keep loading the parameters from currentBacktestRunId (which was trained on currentBacktestSymbol)
+                // Note: The C++ code's `--load-run` naturally loads from `resultsDir/run_id/symbol/summary.json`.
+                // Wait, if `--symbol targetSymbol` is passed to C++, `--load-run` will look for `resultsDir/run_id/targetSymbol/summary.json`.
+                // If it was trained on JD10, and we test on R_75, it will fail to load unless we pass the seed-symbol.
+                // Let's modify the C++ call in PHP to handle this if needed, or we can just pass the currentBacktestSymbol as a new parameter to `?action=run_backtest`.
+                const res = await fetch(`?action=run_backtest&run_id=${currentBacktestRunId}&symbol=${targetSymbol}&trained_on=${currentBacktestSymbol}&rank=${currentBacktestRank}&count=${count}`);
                 const data = await res.json();
                 outDiv.textContent = data.output || "No output returned.";
                 outDiv.scrollTop = outDiv.scrollHeight;

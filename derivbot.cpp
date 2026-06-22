@@ -908,7 +908,7 @@ static void printUsage() {
 
 int main(int argc, char** argv) {
     std::string mode, symbolAlias, appId = "1089", csvOut;
-    std::string strategyName = "rsi";
+    std::string strategyName = "rsi", trainedOn;
     int duration = 15, rsiPeriod = 14, count = 5000, maxTrades = 0, cooldownSec = 0, maxConsecLosses = 0;
     double oversold = 30.0, overbought = 70.0, stake = 1.0, payout = 0.95;
 
@@ -981,6 +981,7 @@ int main(int argc, char** argv) {
         else if (arg == "--delete-all-runs") { mode = "delete-all-runs"; }
         else if (arg == "--load-run") { loadRunId = next(); }
         else if (arg == "--rank") { rank = std::stoi(next()); }
+        else if (arg == "--trained-on") { trainedOn = next(); }
         else if (arg == "--seed-run") { seedRunId = next(); }
         else if (arg == "--seed-rank") { seedRank = std::stoi(next()); }
         else if (arg == "--lot") { lotSize = std::stod(next()); }
@@ -1154,7 +1155,8 @@ int main(int argc, char** argv) {
     std::function<double()> rsiReaderFn;
 
     if (!loadRunId.empty()) {
-        genericStrat = ResultsManager::loadStrategy(resultsDir, loadRunId, symbol, rank, strategyName, &duration, &tpPips, &slPips);
+        std::string loadSymbol = trainedOn.empty() ? symbol : resolveSymbol(trainedOn);
+        genericStrat = ResultsManager::loadStrategy(resultsDir, loadRunId, loadSymbol, rank, strategyName, &duration, &tpPips, &slPips);
         if (!genericStrat) return 1;
 
         StrategyBase* ptr = genericStrat.get();
