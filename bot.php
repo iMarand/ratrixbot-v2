@@ -19,14 +19,16 @@ try {
     
     // Create tables if they don't exist
     $db->exec("CREATE TABLE IF NOT EXISTS runs (
-        id TEXT PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT,
         symbol TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         top_strategy TEXT,
         top_win_rate REAL,
         top_pnl REAL,
         rl_pnl REAL,
-        is_synced INTEGER DEFAULT 1
+        is_synced INTEGER DEFAULT 1,
+        UNIQUE(run_id, symbol)
     )");
     
 } catch(PDOException $e) {
@@ -38,20 +40,22 @@ function syncResultsToDB($db, $results_dir) {
     if (!is_dir($results_dir)) return;
     
     $run_dirs = glob($results_dir . '/run_*', GLOB_ONLYDIR);
-    $existing_runs_stmt = $db->query("SELECT id FROM runs");
+    $existing_runs_stmt = $db->query("SELECT run_id, symbol FROM runs");
     $existing = [];
     while ($row = $existing_runs_stmt->fetch(PDO::FETCH_ASSOC)) {
-        $existing[] = $row['id'];
+        $existing[$row['run_id'] . '_' . $row['symbol']] = true;
     }
     
     foreach ($run_dirs as $run_dir) {
         $run_id = basename($run_dir);
-        if (in_array($run_id, $existing)) continue; // Already synced
         
         // Find symbols inside this run
         $symbol_dirs = glob($run_dir . '/*', GLOB_ONLYDIR);
         foreach ($symbol_dirs as $sym_dir) {
             $symbol = basename($sym_dir);
+            
+            if (isset($existing[$run_id . '_' . $symbol])) continue; // Already synced
+            
             $summary_path = $sym_dir . '/summary.json';
             
             if (file_exists($summary_path)) {
@@ -63,7 +67,7 @@ function syncResultsToDB($db, $results_dir) {
                 $top_pnl = isset($json['strategies'][0]) ? $json['strategies'][0]['netPnl'] : 0;
                 $rl_pnl = isset($json['rl_result']['netPnl']) ? $json['rl_result']['netPnl'] : 0;
                 
-                $stmt = $db->prepare("INSERT INTO runs (id, symbol, top_strategy, top_win_rate, top_pnl, rl_pnl) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt = $db->prepare("INSERT OR IGNORE INTO runs (run_id, symbol, top_strategy, top_win_rate, top_pnl, rl_pnl) VALUES (?, ?, ?, ?, ?, ?)");
                 $stmt->execute([$run_id, $symbol, $top_strat, $top_wr, $top_pnl, $rl_pnl]);
             }
         }
@@ -361,20 +365,27 @@ if (isset($_GET['action'])) {
         <!-- DASHBOARD VIEW -->
         <div id="view-dashboard" class="view-section active">
             <h1>Dashboard</h1>
-            <p>Monitor your active bot sessions.</p>
+            <p>Monitor your active bot sessions and view overall performance.</p>
             
-            <div class="card" style="margin-top: 24px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                    <div>
-                        <strong>Training Status:</strong> 
-                        <span id="train-status-badge" class="status-badge status-stopped">Checking...</span>
+            <div class="flex-row" style="margin-top: 24px;">
+                <div class="card flex-1">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <div>
+                            <strong>Training Status:</strong> 
+                            <span id="train-status-badge" class="status-badge status-stopped">Checking...</span>
+                        </div>
+                        <div>
+                            <button class="btn-danger" onclick="stopTraining()">Stop Bot</button>
+                        </div>
                     </div>
-                    <div>
-                        <button class="btn-danger" onclick="stopTraining()">Stop Bot</button>
-                    </div>
+                    
+                    <div class="terminal" id="terminal-logs">Loading logs...</div>
                 </div>
                 
-                <div class="terminal" id="terminal-logs">Loading logs...</div>
+                <div class="card flex-1">
+                    <h3>Recent Performance (Last 10 Runs)</h3>
+                    <canvas id="dashboardChart" style="width: 100%; height: 380px; margin-top: 16px;"></canvas>
+                </div>
             </div>
         </div>
         
@@ -486,16 +497,21 @@ if (isset($_GET['action'])) {
         let logInterval = null;
         let chartInstance = null;
 
+        let dashboardChartInstance = null;
+
         function switchView(viewId) {
             document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             
             document.getElementById('view-' + viewId).classList.add('active');
-            event.target.classList.add('active');
+            if (event && event.target) {
+                event.target.classList.add('active');
+            }
             
             if (viewId === 'dashboard') {
                 checkStatus();
                 if(!logInterval) logInterval = setInterval(fetchLogs, 2000);
+                loadDashboardChart();
             } else {
                 if(logInterval) { clearInterval(logInterval); logInterval = null; }
             }
@@ -503,6 +519,47 @@ if (isset($_GET['action'])) {
             if (viewId === 'results') {
                 loadResults();
             }
+        }
+        
+        async function loadDashboardChart() {
+            try {
+                const res = await fetch('?action=list_runs');
+                const data = await res.json();
+                
+                const recent = data.runs.slice(0, 10).reverse(); // Last 10 runs
+                const labels = recent.map(r => r.run_id.split('_')[1].substring(4) + " " + r.symbol); // short label
+                const agentPnl = recent.map(r => r.rl_pnl);
+                const bestGridPnl = recent.map(r => r.top_pnl);
+                
+                if (dashboardChartInstance) dashboardChartInstance.destroy();
+                
+                const ctx = document.getElementById('dashboardChart').getContext('2d');
+                dashboardChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Agent P&L ($)',
+                                data: agentPnl,
+                                borderColor: '#e55a50',
+                                backgroundColor: 'rgba(229, 90, 80, 0.1)',
+                                fill: true,
+                                tension: 0.3
+                            },
+                            {
+                                label: 'Best Grid P&L ($)',
+                                data: bestGridPnl,
+                                borderColor: '#333333',
+                                backgroundColor: 'transparent',
+                                borderDash: [5, 5],
+                                tension: 0.3
+                            }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+            } catch(e) { console.error("Failed to load dashboard chart", e); }
         }
 
         function toggleMarketType() {
@@ -584,15 +641,15 @@ if (isset($_GET['action'])) {
                 data.runs.forEach(r => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td>${r.id}</td>
+                        <td>${r.run_id}</td>
                         <td>${r.symbol}</td>
                         <td>${r.top_strategy}</td>
                         <td>${r.top_win_rate}%</td>
                         <td>$${r.top_pnl}</td>
                         <td>$${r.rl_pnl}</td>
                         <td>
-                            <button onclick="viewChart('${r.id}', '${r.symbol}')" style="padding:4px 8px; font-size:0.8rem;">Chart</button>
-                            <button onclick="runBacktest('${r.id}', '${r.symbol}')" style="padding:4px 8px; font-size:0.8rem; margin-left: 4px; background: #555;">Backtest</button>
+                            <button onclick="viewChart('${r.run_id}', '${r.symbol}')" style="padding:4px 8px; font-size:0.8rem;">Chart</button>
+                            <button onclick="runBacktest('${r.run_id}', '${r.symbol}')" style="padding:4px 8px; font-size:0.8rem; margin-left: 4px; background: #555;">Backtest</button>
                         </td>
                     `;
                     tbody.appendChild(tr);
