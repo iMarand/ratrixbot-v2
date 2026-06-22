@@ -345,18 +345,26 @@
 
             <section id="training">
                 <h2>Training & Reinforcement Learning</h2>
-                <p>The crown jewel of Ratrix Bot v2. The training engine downloads tick history, runs thousands of grid-search parameter combinations across 6 distinct strategies, and uses a Q-Learning meta-agent to figure out exactly which strategies perform best under current market regimes (Trend, Volatility, Momentum).</p>
+                <p>The crown jewel of Ratrix Bot v2. The training engine downloads tick history, runs thousands of grid-search parameter combinations across distinct strategies, and uses a Q-Learning meta-agent to figure out exactly which strategies perform best under current market regimes (Trend, Volatility, Momentum, and Candle Patterns).</p>
                 
+                <h3>Phase 1: Grid Search & Phase 2: Q-Learning (162 States) <span class="badge-new">NEW</span></h3>
+                <p>The bot now evaluates Market State across 5 dimensions: Trend, Volatility, Momentum, Regime, and <strong>Candle Patterns</strong> (Bullish, Bearish, Neutral). This produces a massive 162-state brain that deeply understands price action context.</p>
+
+                <h3>Phase 3: Parameter Refinement <span class="badge-new">NEW</span></h3>
+                <p>After finding the #1 Rank strategy, the bot enters a <strong>Hill-Climbing Refinement Phase</strong>. It tweaks the strategy's numeric parameters by ±5% to ±10% repeatedly to squeeze out the absolute maximum Win Rate and reduce cumulative drawdowns.</p>
                 <h3>Continuous Learning Mode</h3>
-                <p>This command runs the training engine in an infinite loop. It will train, save the "brain", sleep for 5 minutes, and train again. Perfect for running on a VPS.</p>
-                <pre><code>./derivbot.exe --train --symbols jump10,jump25,v75 --autoadjust</code></pre>
+                <p>This command runs the training engine in an infinite loop. By default, there is no delay between loops (continuous execution). You can adjust this with <code>--loop-delay</code>.</p>
+                <pre><code>./derivbot.exe --train --symbols jump10,jump25,v75 --autoadjust --loop-delay 0</code></pre>
 
                 <h3>Time-Boxed Training</h3>
                 <p>Limit the training loop to a specific number of hours.</p>
                 <pre><code>./derivbot.exe --train --symbols jump10 --autoadjust --train-hours 4</code></pre>
 
-                <h3>Multi-Timeframe Optimization <span class="badge-new">NEW</span></h3>
-                <p>Ratrix Bot v2 now features native Candlestick Price Action recognition. The training engine will dynamically test multiple <strong>Candle Timeframes</strong> (5s, 15s, 30s, 60s) against multiple <strong>Trade Durations</strong> (15s, 30s, 60s) to discover exactly which candle shape predicts which trade outcome across any market.</p>
+                <h3>Multi-Timeframe Optimization</h3>
+                <p>Ratrix Bot v2 features native Candlestick Price Action recognition. The training engine dynamically tests multiple <strong>Candle Timeframes</strong> (5s, 15s, 30s, 60s) against multiple <strong>Trade Durations</strong> (15s, 30s, 60s) to discover exactly which candle shape predicts which trade outcome.</p>
+
+                <h3>Candle Decision Tree Strategy <span class="badge-new">NEW</span></h3>
+                <p>The <code>candle_tree</code> strategy uses an Information Gain (ID3) algorithm to dynamically build a decision tree from 7 unique candle features: body ratio, upper/lower wick ratios, engulfing status, color flips, range expansion, and consecutive directional streaks.</p>
             </section>
 
             <section id="backtesting">
@@ -429,7 +437,7 @@
                         </tr>
                         <tr>
                             <td><code>--strategy &lt;name&gt;</code></td>
-                            <td><code>rsi</code> | <code>ema_cross</code> | <code>macd</code> | <code>bollinger</code> | <code>stochastic</code> | <code>price_action</code> | <code>multi_confluence</code></td>
+                            <td><code>rsi</code> | <code>ema_cross</code> | <code>macd</code> | <code>bollinger</code> | <code>stochastic</code> | <code>price_action</code> | <code>candle_tree</code> | <code>multi_confluence</code></td>
                         </tr>
                         <tr>
                             <td><code>--duration &lt;sec&gt;</code></td>
@@ -502,6 +510,26 @@
                         <tr>
                             <td><code>--top-k &lt;n&gt;</code></td>
                             <td>How many top strategies to export to JSON. Default: 10</td>
+                        </tr>
+                        <tr>
+                            <td><code>--strategies &lt;list&gt;</code></td>
+                            <td>Comma-separated list of strategies to include in grid search (default: all).</td>
+                        </tr>
+                        <tr>
+                            <td><code>--durations &lt;list&gt;</code></td>
+                            <td>Comma-separated list of trade durations in seconds to test (default: 15,30,60).</td>
+                        </tr>
+                        <tr>
+                            <td><code>--candles &lt;list&gt;</code></td>
+                            <td>Comma-separated list of candle periods in seconds to test (default: 5,10,15,30,60).</td>
+                        </tr>
+                        <tr>
+                            <td><code>--no-rl</code></td>
+                            <td>Skips the Phase 2 Q-Learning Meta-Learner execution entirely.</td>
+                        </tr>
+                        <tr>
+                            <td><code>--loop-delay &lt;sec&gt;</code></td>
+                            <td>Seconds to wait between <code>--autoadjust</code> cycles (default: 0).</td>
                         </tr>
                     </tbody>
                 </table>
