@@ -870,8 +870,8 @@ int main(int argc, char** argv) {
     }
 
     if (mode == "backtest" || mode == "paper") {
-        if (duration != 15 && duration != 30) {
-            std::cerr << "This tool is scoped to 15s/30s durations only. Got: " << duration << "\n";
+        if (duration != 15 && duration != 30 && duration != 60) {
+            std::cerr << "This tool is scoped to 15s/30s/60s durations only. Got: " << duration << "\n";
             return 1;
         }
         if (loadRunId.empty()) {
@@ -998,7 +998,7 @@ int main(int argc, char** argv) {
     std::function<double()> rsiReaderFn;
 
     if (!loadRunId.empty()) {
-        genericStrat = ResultsManager::loadStrategy(resultsDir, loadRunId, symbol, rank, strategyName);
+        genericStrat = ResultsManager::loadStrategy(resultsDir, loadRunId, symbol, rank, strategyName, &duration);
         if (!genericStrat) return 1;
 
         StrategyBase* ptr = genericStrat.get();

@@ -5,6 +5,7 @@
 #include "bollinger_strategy.hpp"
 #include "stochastic_strategy.hpp"
 #include "multi_confluence.hpp"
+#include "price_action_strategy.hpp"
 #include "../rsi.hpp"
 #include <vector>
 #include <functional>
@@ -218,6 +219,20 @@ public:
                 {"ema_fast",   {8, 13}},
                 {"ema_slow",   {30}},
                 {"adx_filter", {0, 1}}
+            });
+            entries.push_back(std::move(e));
+        }
+
+        // 7. Price Action (Multi-Timeframe)
+        {
+            StrategyGridEntry e;
+            e.name = "price_action";
+            e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
+                return std::make_unique<PriceActionStrategy>((int)p.at("candle_period"));
+            };
+            e.paramCombinations = detail::cartesian({
+                {"candle_period", {5, 10, 15, 30, 60}},
+                {"trade_duration", {15, 30, 60}}
             });
             entries.push_back(std::move(e));
         }

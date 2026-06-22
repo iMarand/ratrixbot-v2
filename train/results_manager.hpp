@@ -80,7 +80,8 @@ public:
                                                       const std::string& runId,
                                                       const std::string& symbol,
                                                       int rank,
-                                                      std::string& outStrategyName) {
+                                                      std::string& outStrategyName,
+                                                      int* outTradeDuration = nullptr) {
         std::string jsonPath = baseDir + "/" + runId + "/" + symbol + "/summary.json";
         if (!fs::exists(jsonPath)) {
             std::cerr << "Cannot find summary.json for run " << runId << " symbol " << symbol << "\n";
@@ -109,6 +110,10 @@ public:
 
             std::cout << "Loading rank " << rank << " strategy: " << outStrategyName << "\n";
             std::cout << "Parameters restored from " << runId << ".\n";
+
+            if (outTradeDuration && params.count("trade_duration")) {
+                *outTradeDuration = (int)params.at("trade_duration");
+            }
 
             auto allGrid = StrategyRegistry::getAllGridEntries();
             for (const auto& entry : allGrid) {

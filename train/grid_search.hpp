@@ -70,7 +70,11 @@ public:
             Signal sig = strat->onPrice(times[i], prices[i]);
             if (sig == Signal::None) continue;
             
-            int64_t targetExit = times[i] + cfg_.durationSec;
+            int duration = cfg_.durationSec;
+            if (params.count("trade_duration")) {
+                duration = (int)params.at("trade_duration");
+            }
+            int64_t targetExit = times[i] + duration;
             size_t j = i + 1;
             while (j < n && times[j] < targetExit) j++;
             if (j >= n) continue;

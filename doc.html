@@ -354,6 +354,9 @@
                 <h3>Time-Boxed Training</h3>
                 <p>Limit the training loop to a specific number of hours.</p>
                 <pre><code>./derivbot.exe --train --symbols jump10 --autoadjust --train-hours 4</code></pre>
+
+                <h3>Multi-Timeframe Optimization <span class="badge-new">NEW</span></h3>
+                <p>Ratrix Bot v2 now features native Candlestick Price Action recognition. The training engine will dynamically test multiple <strong>Candle Timeframes</strong> (5s, 15s, 30s, 60s) against multiple <strong>Trade Durations</strong> (15s, 30s, 60s) to discover exactly which candle shape predicts which trade outcome across any market.</p>
             </section>
 
             <section id="backtesting">
@@ -367,6 +370,11 @@
                 <h3>Load from Trained AI</h3>
                 <p>Instead of manually typing all the parameters, load the #1 best strategy perfectly from a previous training run.</p>
                 <pre><code>./derivbot.exe --mode backtest --symbol jump10 --load-run run_20260621_234305 --rank 1</code></pre>
+                
+                <div class="alert">
+                    <strong>Dynamic Trade Duration</strong>
+                    <p>When using <code>--load-run</code>, if the AI discovered that a 30s trade works better than a 15s trade for that strategy, it will <strong>automatically override</strong> your command-line duration and use the optimal one!</p>
+                </div>
             </section>
 
             <section id="papertrading">
@@ -421,11 +429,11 @@
                         </tr>
                         <tr>
                             <td><code>--strategy &lt;name&gt;</code></td>
-                            <td><code>rsi</code> | <code>ema_cross</code> | <code>macd</code> | <code>bollinger</code> | <code>stochastic</code> | <code>multi_confluence</code></td>
+                            <td><code>rsi</code> | <code>ema_cross</code> | <code>macd</code> | <code>bollinger</code> | <code>stochastic</code> | <code>price_action</code> | <code>multi_confluence</code></td>
                         </tr>
                         <tr>
                             <td><code>--duration &lt;sec&gt;</code></td>
-                            <td>Contract duration in seconds (15 or 30). Default: 15</td>
+                            <td>Contract duration in seconds (15, 30, or 60). Default: 15</td>
                         </tr>
                         <tr>
                             <td><code>--stake &lt;amt&gt;</code></td>

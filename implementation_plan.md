@@ -63,81 +63,41 @@ derivbot/
 
 #### [NEW] [ema.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/indicators/ema.hpp)
 Exponential Moving Average with configurable period. Supports multiple instances for fast/slow crossover detection.
-- `EMA(int period)` — incremental update, returns smoothed value once seeded
-- Used by: EMA crossover strategy, MACD
 
 #### [NEW] [macd.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/indicators/macd.hpp)
 MACD = EMA(12) − EMA(26), signal line = EMA(9) of MACD, histogram = MACD − signal.
-- Returns `{macd, signal, histogram}` struct
-- Used by: MACD strategy, multi-confluence
 
 #### [NEW] [bollinger.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/indicators/bollinger.hpp)
 Bollinger Bands = SMA(20) ± 2×σ. Tracks upper/lower/middle bands.
-- Returns `{upper, middle, lower, bandwidth}` struct
-- Used by: Bollinger strategy, multi-confluence
 
 #### [NEW] [stochastic.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/indicators/stochastic.hpp)
 Stochastic Oscillator: %K = (close − lowest) / (highest − lowest) × 100, %D = SMA(%K, 3).
-- Configurable lookback period (default 14)
-- Used by: Stochastic strategy, multi-confluence
 
 #### [NEW] [atr.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/indicators/atr.hpp)
-Average True Range — measures volatility. Since we only have tick data (not OHLC), we'll approximate using rolling price range over N ticks.
-- Used by: RL state features (volatility regime), position sizing
+Average True Range — measures volatility.
 
 #### [NEW] [adx.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/indicators/adx.hpp)
-Average Directional Index — measures trend strength (0-100). Adapted for tick data using directional movement of consecutive prices.
-- ADX > 25 = trending, ADX < 20 = ranging
-- Used by: RL state features, multi-confluence (only trade mean-reversion when ADX is low)
+Average Directional Index — measures trend strength (0-100).
 
 ---
 
 ### 2. New Strategies (`strategies/`)
 
 #### [NEW] [strategy_base.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/strategies/strategy_base.hpp)
-Abstract base class so all strategies share a uniform interface:
-```cpp
-class StrategyBase {
-public:
-    virtual ~StrategyBase() = default;
-    virtual Signal onPrice(int64_t time, double price) = 0;
-    virtual std::string name() const = 0;
-    virtual std::string describeParams() const = 0;
-};
-```
-
-#### [NEW] [ema_crossover.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/strategies/ema_crossover.hpp)
-Fires Rise when fast EMA crosses above slow EMA, Fall when it crosses below.
-- Parameters: `fastPeriod` (5-20), `slowPeriod` (20-100)
-- Grid search ranges: fast ∈ {5,8,10,13}, slow ∈ {20,30,50}
-
-#### [NEW] [macd_strategy.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/strategies/macd_strategy.hpp)
-Fires on MACD histogram zero-crossing (momentum shift).
-- Parameters: `fastEma` (8-15), `slowEma` (20-30), `signalPeriod` (5-12)
-- Grid search ranges: fast ∈ {8,12}, slow ∈ {21,26}, signal ∈ {5,9}
-
-#### [NEW] [bollinger_strategy.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/strategies/bollinger_strategy.hpp)
-Mean-reversion: Rise when price touches lower band + RSI oversold, Fall when price touches upper band + RSI overbought.
-- Parameters: `bbPeriod` (15-25), `bbStdDev` (1.5-2.5), RSI thresholds
-- Grid search: period ∈ {15,20,25}, stddev ∈ {1.5,2.0,2.5}
-
-#### [NEW] [stochastic_strategy.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/strategies/stochastic_strategy.hpp)
-Fires when %K crosses %D in overbought (>80) or oversold (<20) territory.
-- Parameters: `kPeriod` (5-21), `dPeriod` (3-5), thresholds
-- Grid search: kPeriod ∈ {5,9,14,21}, dPeriod ∈ {3,5}
-
-#### [NEW] [multi_confluence.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/strategies/multi_confluence.hpp)
-The powerhouse strategy — requires N-of-M indicators to agree before firing:
-- Configurable: which indicators to include, minimum agreement count
-- Example: "Fire Rise only if RSI oversold AND Stochastic oversold AND price at Bollinger lower band AND ADX < 25 (ranging market = mean reversion works)"
-- Grid search iterates over different indicator combinations and agreement thresholds
+Abstract base class for strategies.
 
 #### [NEW] [strategy_registry.hpp](file:///d:/More_Projects/Projects/Demos/CPP/derivbot/strategies/strategy_registry.hpp)
-Central registry that:
-1. Knows every strategy class and its parameter grid
-2. Can instantiate any strategy by name + param set
-3. Generates all parameter combinations for grid search
-4. Estimated total combinations: ~200-500 per symbol (keeps training tractable)
+Central registry that generates all parameter combinations for grid search.
+
+### 4. Registry & Grid Search Multi-Timeframe Integration
+**[MODIFY]** `strategies/strategy_registry.hpp` and `train/grid_search.hpp`
+To ensure the AI finds the absolute perfect setup for short-term trading across all markets (Synthetic, Forex, Gold), we will inject two new critical parameters into the Grid Search:
+- **`candle_period`**: The AI will test 5s, 15s, 30s, and 60s candles.
+- **`trade_duration`**: The AI will test 15s, 30s, and 60s contract durations.
+
+Instead of hardcoding the backtest duration, the `GridSearchEngine` will dynamically read `trade_duration` from the strategy's parameter set and simulate the trade exit accordingly. The `price_action` strategy will instantiate its internal `OHLCBuilder` using the tested `candle_period`. 
+
+This guarantees the AI will discover exactly which candle timeframe (e.g., 5s candles) works best for which trade duration (e.g., 15s contract) on any given asset.
 
 ---
 
