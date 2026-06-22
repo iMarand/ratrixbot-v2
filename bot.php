@@ -593,6 +593,8 @@ if (isset($_GET['action'])) {
 
     <script>
         let logInterval = null;
+        let dashboardRefreshInterval = null;
+        let resultsRefreshInterval = null;
         let chartInstance = null;
 
         let dashboardChartInstance = null;
@@ -606,16 +608,21 @@ if (isset($_GET['action'])) {
                 event.target.classList.add('active');
             }
             
+            // Clear all intervals
+            if (logInterval) { clearInterval(logInterval); logInterval = null; }
+            if (dashboardRefreshInterval) { clearInterval(dashboardRefreshInterval); dashboardRefreshInterval = null; }
+            if (resultsRefreshInterval) { clearInterval(resultsRefreshInterval); resultsRefreshInterval = null; }
+            
             if (viewId === 'dashboard') {
                 checkStatus();
-                if(!logInterval) logInterval = setInterval(fetchLogs, 2000);
+                logInterval = setInterval(fetchLogs, 2000);
                 loadDashboardChart();
-            } else {
-                if(logInterval) { clearInterval(logInterval); logInterval = null; }
+                dashboardRefreshInterval = setInterval(loadDashboardChart, 10000); // refresh chart every 10s
             }
             
             if (viewId === 'results') {
                 loadResults();
+                resultsRefreshInterval = setInterval(loadResults, 10000); // refresh list every 10s
             }
         }
         

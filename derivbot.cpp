@@ -895,7 +895,8 @@ static void printUsage() {
         "  --strategies <list>     Comma-separated list of strategies to test (default all)\n"
         "  --durations <list>      Comma-separated trade durations (default 15,30,60)\n"
         "  --candles <list>        Comma-separated candle periods (default 5,10,15,30,60)\n"
-        "  --no-rl                 Skip RL Meta-Learner phase entirely\n\n"
+        "  --no-rl                 Skip RL Meta-Learner phase entirely\n"
+        "  --loop-delay <sec>      Seconds to wait between autoadjust cycles (default 0)\n\n"
         "Results Management:\n"
         "  --list-runs             List all finished training runs\n"
         "  --delete-run <id>       Delete a specific run\n"
@@ -927,6 +928,7 @@ int main(int argc, char** argv) {
     std::string durationsStr;
     std::string candlesStr;
     bool skipRL = false;
+    int loopDelay = 0;
 
     std::string loadRunId, deleteRunId;
     int rank = 1;
@@ -973,6 +975,7 @@ int main(int argc, char** argv) {
         else if (arg == "--durations") durationsStr = next();
         else if (arg == "--candles") candlesStr = next();
         else if (arg == "--no-rl") skipRL = true;
+        else if (arg == "--loop-delay") loopDelay = std::stoi(next());
         else if (arg == "--list-runs") { mode = "list-runs"; }
         else if (arg == "--delete-run") { mode = "delete-run"; deleteRunId = next(); }
         else if (arg == "--delete-all-runs") { mode = "delete-all-runs"; }
@@ -1113,9 +1116,9 @@ int main(int argc, char** argv) {
                 }
             }
 
-            if (!detail::g_stopRequested.load()) {
-                std::cout << "\nAuto-adjust enabled. Waiting 5 minutes before re-fetching and refining...\n";
-                for (int i = 0; i < 300 && !detail::g_stopRequested.load(); i++) {
+            if (!detail::g_stopRequested.load() && loopDelay > 0) {
+                std::cout << "\nAuto-adjust enabled. Waiting " << loopDelay << " seconds before re-fetching and refining...\n";
+                for (int i = 0; i < loopDelay && !detail::g_stopRequested.load(); i++) {
                     std::this_thread::sleep_for(std::chrono::seconds(1));
                 }
             }
