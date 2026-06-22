@@ -451,6 +451,26 @@
                             <td><code>--rank &lt;n&gt;</code></td>
                             <td>Loads the Nth best strategy when using <code>--load-run</code>. Default: 1</td>
                         </tr>
+                        <tr>
+                            <td><code>--seed-run &lt;id&gt;</code></td>
+                            <td>Starts training from a previously saved run's Q-table and strategy parameters.</td>
+                        </tr>
+                        <tr>
+                            <td><code>--seed-rank &lt;n&gt;</code></td>
+                            <td>The rank of the strategy to seed from (used with <code>--seed-run</code>).</td>
+                        </tr>
+                        <tr>
+                            <td><code>--tp &lt;pips&gt;</code></td>
+                            <td>Take Profit distance in pips (Forex/Gold only).</td>
+                        </tr>
+                        <tr>
+                            <td><code>--sl &lt;pips&gt;</code></td>
+                            <td>Stop Loss distance in pips (Forex/Gold only).</td>
+                        </tr>
+                        <tr>
+                            <td><code>--lot &lt;size&gt;</code></td>
+                            <td>Lot size for Forex/Gold P&L calculation (default 0.5 = $5/pip).</td>
+                        </tr>
                     </tbody>
                 </table>
 
@@ -503,7 +523,11 @@
                 Wake up and see what the AI accomplished.</p>
                 <pre><code>./derivbot.exe --list-runs</code></pre>
 
-                <p><strong>Step 3: Deploy the Best Engine</strong><br>
+                <p><strong>Step 3: Test the Best Run</strong><br>
+                Wake up and see what the AI accomplished.</p>
+                <pre><code>./derivbot --mode backtest --load-run run_20260621_224604 --symbol JD10 --rank 1</code></pre>
+
+                <p><strong>Step 4: Deploy the Best Engine</strong><br>
                 Take the latest timestamped run ID, and deploy the #1 ranked strategy directly into the live paper trading feed.</p>
                 <pre><code>./derivbot.exe --mode paper --symbol jump10 --load-run run_20260622_080000 --rank 1</code></pre>
             </section>

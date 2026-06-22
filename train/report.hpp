@@ -52,7 +52,8 @@ public:
                  << "  P&L:        " << res.netPnl << "\n"
                  << "  Win Rate:   " << res.winRatePct << "%\n"
                  << "  Trades:     " << res.totalTrades << "\n"
-                 << "  Max DD:     " << res.maxDrawdown << "\n\n";
+                 << "  Max DD:     " << res.maxDrawdown << "\n"
+                 << "  Max Streak: " << res.maxLossStreak << " losses in a row\n\n";
         }
         
         file << "[RL Agent Training]\n\n"
@@ -82,6 +83,7 @@ public:
             s["winRatePct"] = res.winRatePct;
             s["totalTrades"] = res.totalTrades;
             s["maxDrawdown"] = res.maxDrawdown;
+            s["maxLossStreak"] = res.maxLossStreak;
             s["params"] = res.params; // std::map automatically serializes to json object
             strats.push_back(s);
         }
@@ -105,7 +107,7 @@ public:
             const auto& res = topGrid[i];
             std::cout << "  " << (i+1) << ". " << res.strategyName << "  P&L: " << res.netPnl 
                       << "  WR: " << res.winRatePct << "%  Trades: " << res.totalTrades 
-                      << "  DD: " << res.maxDrawdown << "\n"
+                      << "  DD: " << res.maxDrawdown << "  Streak: " << res.maxLossStreak << "\n"
                       << "     (" << res.paramString() << ")\n";
         }
         

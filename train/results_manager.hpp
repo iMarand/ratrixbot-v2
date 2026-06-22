@@ -81,7 +81,9 @@ public:
                                                       const std::string& symbol,
                                                       int rank,
                                                       std::string& outStrategyName,
-                                                      int* outTradeDuration = nullptr) {
+                                                      int* outTradeDuration = nullptr,
+                                                      double* outTpPips = nullptr,
+                                                      double* outSlPips = nullptr) {
         std::string jsonPath = baseDir + "/" + runId + "/" + symbol + "/summary.json";
         if (!fs::exists(jsonPath)) {
             std::cerr << "Cannot find summary.json for run " << runId << " symbol " << symbol << "\n";
@@ -113,6 +115,12 @@ public:
 
             if (outTradeDuration && params.count("trade_duration")) {
                 *outTradeDuration = (int)params.at("trade_duration");
+            }
+            if (outTpPips && params.count("tp_pips")) {
+                *outTpPips = params.at("tp_pips");
+            }
+            if (outSlPips && params.count("sl_pips")) {
+                *outSlPips = params.at("sl_pips");
             }
 
             auto allGrid = StrategyRegistry::getAllGridEntries();

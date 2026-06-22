@@ -10,6 +10,8 @@
 #include <memory>
 #include <thread>
 #include <chrono>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 // Forward declarations to break dependencies
 class DerivWsClient;
@@ -27,9 +29,14 @@ struct TrainConfig {
     int    durationSec  = 15;
     double stake        = 1.0;
     double payoutPct    = 0.95;
+    double lotSize      = 0.5;
     std::string resultsDir = "results";
     bool   autoAdjust   = false;
     double trainHours   = 0.0; // 0 = unlimited
+    
+    // Seed training: continue from a previous good run
+    std::string seedRunId;
+    int         seedRank = 0; // 0 = no seed
 };
 
 class TrainEngine {
@@ -75,9 +82,19 @@ private:
         gsCfg.stake = cfg_.stake;
         gsCfg.payoutPct = cfg_.payoutPct;
         gsCfg.minTrades = 10;
+        gsCfg.lotSize = cfg_.lotSize;
+        gsCfg.symbol = symbol;
         
         GridSearchEngine gs(gsCfg);
-        auto allGrid = StrategyRegistry::getAllGridEntries();
+        auto allGrid = isForexOrCommodity(symbol) 
+            ? StrategyRegistry::getForexGridEntries() 
+            : StrategyRegistry::getAllGridEntries();
+        
+        // If seeding, inject the seed strategy's params + neighbors into the grid
+        if (cfg_.seedRank > 0 && !cfg_.seedRunId.empty()) {
+            injectSeedStrategy(allGrid, symbol);
+        }
+        
         auto topGrid = gs.run(allGrid, trainTimes, trainPrices, cfg_.topK);
         
         if (topGrid.empty()) {
@@ -88,10 +105,9 @@ private:
         // Phase 2: RL Meta-Learner Training
         std::vector<std::function<std::unique_ptr<StrategyBase>()>> topFactories;
         for (const auto& res : topGrid) {
-            // Find the factory for this strategy name
             for (const auto& entry : allGrid) {
                 if (entry.name == res.strategyName) {
-                    ParamSet p = res.params; // copy
+                    ParamSet p = res.params;
                     topFactories.push_back([entry, p]() { return entry.factory(p); });
                     break;
                 }
@@ -106,6 +122,16 @@ private:
         
         std::cout << "\nTraining RL agent on top " << topFactories.size() << " strategies...\n";
         RLTrainer rl(topFactories, rlCfg);
+        
+        // If seeding, load the previous Q-table so the RL agent continues learning
+        if (cfg_.seedRank > 0 && !cfg_.seedRunId.empty()) {
+            std::string seedQPath = cfg_.resultsDir + "/" + cfg_.seedRunId + "/" + symbol + "/qtable.json";
+            if (std::filesystem::exists(seedQPath)) {
+                rl.agent().load(seedQPath);
+                std::cout << "  Loaded seed Q-table from " << cfg_.seedRunId << "\n";
+            }
+        }
+        
         RLTrainResult rlRes = rl.train(trainTimes, trainPrices);
 
         // Save Results
@@ -119,6 +145,52 @@ private:
         
         std::string qTablePath = symbolDir + "/qtable.json";
         rl.agent().save(qTablePath);
+    }
+    
+    // Load seed strategy params from a previous run and add neighbor variations
+    void injectSeedStrategy(std::vector<StrategyGridEntry>& grid, const std::string& symbol) {
+        std::string jsonPath = cfg_.resultsDir + "/" + cfg_.seedRunId + "/" + symbol + "/summary.json";
+        if (!std::filesystem::exists(jsonPath)) {
+            std::cerr << "Seed run not found for " << symbol << ", skipping seed.\n";
+            return;
+        }
+        
+        std::ifstream file(jsonPath);
+        nlohmann::json j;
+        try { file >> j; } catch (...) { return; }
+        
+        auto strategies = j["strategies"];
+        if (cfg_.seedRank < 1 || cfg_.seedRank > (int)strategies.size()) return;
+        
+        auto seedEntry = strategies[cfg_.seedRank - 1];
+        std::string seedName = seedEntry["strategyName"].get<std::string>();
+        ParamSet seedParams = seedEntry["params"].get<ParamSet>();
+        
+        std::cout << "  Seeding from " << cfg_.seedRunId << " rank " << cfg_.seedRank 
+                  << " (" << seedName << ")\n";
+        
+        // Find this strategy's grid entry and inject the seed + neighbors
+        for (auto& entry : grid) {
+            if (entry.name == seedName) {
+                // Add the exact seed params as the first combination
+                entry.paramCombinations.insert(entry.paramCombinations.begin(), seedParams);
+                
+                // Generate neighbor variations: for each numeric param, try ±10% and ±20%
+                for (auto& [key, val] : seedParams) {
+                    for (double factor : {0.8, 0.9, 1.1, 1.2}) {
+                        ParamSet neighbor = seedParams;
+                        neighbor[key] = std::round(val * factor);
+                        if (neighbor[key] != val && neighbor[key] > 0) {
+                            entry.paramCombinations.push_back(neighbor);
+                        }
+                    }
+                }
+                
+                std::cout << "  Injected " << entry.paramCombinations.size() 
+                          << " combinations (seed + neighbors)\n";
+                break;
+            }
+        }
     }
 
     DerivWsClient& client_;

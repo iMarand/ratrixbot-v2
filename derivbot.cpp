@@ -260,6 +260,9 @@ struct BacktestConfig {
     double overbought = 70.0;
     double stake = 1.0;
     double payoutPct = 0.95;
+    double lotSize = 0.5;
+    double tpPips = 0.0;
+    double slPips = 0.0;
     int cooldownSec = 0;
     std::string csvOut = "backtest_trades.csv";
     int maxConsecLosses = 0; // 0 = no limit; otherwise stop opening new trades after N losses in a row
@@ -397,21 +400,55 @@ BacktestResult runBacktest(const BacktestConfig& cfg,
         }
 
         int64_t entryTime = times[i];
-        int64_t targetExitTime = entryTime + cfg.durationSec;
-
-        size_t j = i + 1;
-        while (j < n && times[j] < targetExitTime) j++;
-        if (j >= n) continue;
-
+        double entryPrice = prices[i];
         Trade t;
         t.entryTime = entryTime;
-        t.entryPrice = prices[i];
-        t.exitTime = times[j];
-        t.exitPrice = prices[j];
+        t.entryPrice = entryPrice;
         t.direction = (sig == Signal::Rise) ? Direction::Rise : Direction::Fall;
         t.stake = cfg.stake;
         t.payoutPct = cfg.payoutPct;
-        t.settle();
+
+        bool useTPSL = isForexOrCommodity(cfg.symbol) && cfg.tpPips > 0 && cfg.slPips > 0;
+        
+        if (useTPSL) {
+            double pipSize = getPipSize(cfg.symbol);
+            double tpDist = cfg.tpPips * pipSize;
+            double slDist = cfg.slPips * pipSize;
+            double dollarPerPip = cfg.lotSize * 10.0;
+
+            bool resolved = false;
+            for (size_t j = i + 1; j < n; j++) {
+                double move = prices[j] - entryPrice;
+                if (sig == Signal::Fall) move = -move; // invert for sell
+
+                if (move >= tpDist) {
+                    t.exitTime = times[j];
+                    t.exitPrice = prices[j];
+                    t.won = true;
+                    t.pnl = cfg.tpPips * dollarPerPip;
+                    resolved = true;
+                    break;
+                }
+                if (move <= -slDist) {
+                    t.exitTime = times[j];
+                    t.exitPrice = prices[j];
+                    t.won = false;
+                    t.pnl = -(cfg.slPips * dollarPerPip);
+                    resolved = true;
+                    break;
+                }
+            }
+            if (!resolved) continue; // skip unresolved trades
+        } else {
+            int64_t targetExitTime = entryTime + cfg.durationSec;
+            size_t j = i + 1;
+            while (j < n && times[j] < targetExitTime) j++;
+            if (j >= n) continue;
+
+            t.exitTime = times[j];
+            t.exitPrice = prices[j];
+            t.settle();
+        }
 
         trades.push_back(t);
 
@@ -487,6 +524,9 @@ struct PaperTradeConfig {
     double overbought = 70.0;
     double stake = 1.0;
     double payoutPct = 0.95;
+    double lotSize = 0.5;
+    double tpPips = 0.0;
+    double slPips = 0.0;
     int cooldownSec = 0;
     std::string csvOut = "paper_trades.csv";
     int maxTrades = 0;
@@ -516,6 +556,9 @@ void runPaperTrading(DerivWsClient& client, const PaperTradeConfig& cfg,
         double entryPrice;
         Direction direction;
         int64_t targetExitTime;
+        bool isTPSL;
+        double tpPrice;
+        double slPrice;
     };
     std::vector<OpenPosition> openPositions;
 
@@ -547,16 +590,42 @@ void runPaperTrading(DerivWsClient& client, const PaperTradeConfig& cfg,
         if (tickTime == 0) continue;
 
         for (size_t i = 0; i < openPositions.size();) {
-            if (tickTime >= openPositions[i].targetExitTime) {
+            bool exitHit = false;
+            auto& pos = openPositions[i];
+            
+            if (pos.isTPSL) {
+                if (pos.direction == Direction::Rise) {
+                    if (tickPrice >= pos.tpPrice) { pos.targetExitTime = tickTime; exitHit = true; } // TP won
+                    else if (tickPrice <= pos.slPrice) { pos.targetExitTime = tickTime; exitHit = true; } // SL lost
+                } else {
+                    if (tickPrice <= pos.tpPrice) { pos.targetExitTime = tickTime; exitHit = true; } // TP won
+                    else if (tickPrice >= pos.slPrice) { pos.targetExitTime = tickTime; exitHit = true; } // SL lost
+                }
+            } else {
+                if (tickTime >= pos.targetExitTime) exitHit = true;
+            }
+
+            if (exitHit) {
                 Trade t;
-                t.entryTime = openPositions[i].entryTime;
-                t.entryPrice = openPositions[i].entryPrice;
+                t.entryTime = pos.entryTime;
+                t.entryPrice = pos.entryPrice;
                 t.exitTime = tickTime;
                 t.exitPrice = tickPrice;
-                t.direction = openPositions[i].direction;
+                t.direction = pos.direction;
                 t.stake = cfg.stake;
                 t.payoutPct = cfg.payoutPct;
-                t.settle();
+
+                if (pos.isTPSL) {
+                    double dollarPerPip = cfg.lotSize * 10.0;
+                    if (pos.direction == Direction::Rise) {
+                        t.won = (tickPrice >= pos.tpPrice);
+                    } else {
+                        t.won = (tickPrice <= pos.tpPrice);
+                    }
+                    t.pnl = t.won ? (cfg.tpPips * dollarPerPip) : -(cfg.slPips * dollarPerPip);
+                } else {
+                    t.settle();
+                }
 
                 csv << t.entryTime << "," << t.entryPrice << "," << t.exitTime << ","
                     << t.exitPrice << "," << Trade::dirName(t.direction) << ","
@@ -584,7 +653,23 @@ void runPaperTrading(DerivWsClient& client, const PaperTradeConfig& cfg,
             pos.entryTime = tickTime;
             pos.entryPrice = tickPrice;
             pos.direction = (sig == Signal::Rise) ? Direction::Rise : Direction::Fall;
-            pos.targetExitTime = tickTime + cfg.durationSec;
+            
+            bool useTPSL = isForexOrCommodity(cfg.symbol) && cfg.tpPips > 0 && cfg.slPips > 0;
+            pos.isTPSL = useTPSL;
+            if (useTPSL) {
+                double pipSize = getPipSize(cfg.symbol);
+                double tpDist = cfg.tpPips * pipSize;
+                double slDist = cfg.slPips * pipSize;
+                if (pos.direction == Direction::Rise) {
+                    pos.tpPrice = tickPrice + tpDist;
+                    pos.slPrice = tickPrice - slDist;
+                } else {
+                    pos.tpPrice = tickPrice - tpDist;
+                    pos.slPrice = tickPrice + slDist;
+                }
+            } else {
+                pos.targetExitTime = tickTime + cfg.durationSec;
+            }
             openPositions.push_back(pos);
 
             std::cout << "[OPENED]  " << Trade::dirName(pos.direction)
@@ -812,6 +897,11 @@ int main(int argc, char** argv) {
 
     std::string loadRunId, deleteRunId;
     int rank = 1;
+    
+    std::string seedRunId;
+    int seedRank = 0;
+    double lotSize = 0.5;
+    double tpPips = 0, slPips = 0;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -850,6 +940,11 @@ int main(int argc, char** argv) {
         else if (arg == "--delete-all-runs") { mode = "delete-all-runs"; }
         else if (arg == "--load-run") { loadRunId = next(); }
         else if (arg == "--rank") { rank = std::stoi(next()); }
+        else if (arg == "--seed-run") { seedRunId = next(); }
+        else if (arg == "--seed-rank") { seedRank = std::stoi(next()); }
+        else if (arg == "--lot") { lotSize = std::stod(next()); }
+        else if (arg == "--tp") { tpPips = std::stod(next()); }
+        else if (arg == "--sl") { slPips = std::stod(next()); }
         else if (arg == "--list-symbols") { mode = "list-symbols"; }
         else if (arg == "--help") { printUsage(); return 0; }
         else { std::cerr << "Unknown argument: " << arg << "\n"; printUsage(); return 1; }
@@ -912,9 +1007,12 @@ int main(int argc, char** argv) {
         tCfg.durationSec = duration;
         tCfg.stake = stake;
         tCfg.payoutPct = payout;
+        tCfg.lotSize = lotSize;
         tCfg.resultsDir = resultsDir;
         tCfg.autoAdjust = autoAdjust;
         tCfg.trainHours = trainHours;
+        tCfg.seedRunId = seedRunId;
+        tCfg.seedRank = seedRank;
 
         std::string runDir = ReportGenerator::createResultsDir(tCfg.resultsDir);
         std::cout << "Results will be saved to: " << runDir << "\n";
@@ -998,7 +1096,7 @@ int main(int argc, char** argv) {
     std::function<double()> rsiReaderFn;
 
     if (!loadRunId.empty()) {
-        genericStrat = ResultsManager::loadStrategy(resultsDir, loadRunId, symbol, rank, strategyName, &duration);
+        genericStrat = ResultsManager::loadStrategy(resultsDir, loadRunId, symbol, rank, strategyName, &duration, &tpPips, &slPips);
         if (!genericStrat) return 1;
 
         StrategyBase* ptr = genericStrat.get();
@@ -1058,6 +1156,9 @@ int main(int argc, char** argv) {
         cfg.payoutPct = payout;
         cfg.cooldownSec = cooldownSec;
         cfg.maxConsecLosses = maxConsecLosses;
+        cfg.tpPips = tpPips;
+        cfg.slPips = slPips;
+        cfg.lotSize = lotSize;
         if (!csvOut.empty()) cfg.csvOut = csvOut;
 
         std::vector<int64_t> times;
@@ -1108,6 +1209,9 @@ int main(int argc, char** argv) {
         cfg.payoutPct = payout;
         cfg.cooldownSec = cooldownSec;
         cfg.maxTrades = maxTrades;
+        cfg.tpPips = tpPips;
+        cfg.slPips = slPips;
+        cfg.lotSize = lotSize;
         if (!csvOut.empty()) cfg.csvOut = csvOut;
 
         runPaperTrading(client, cfg, strategyFn, rsiReaderFn);

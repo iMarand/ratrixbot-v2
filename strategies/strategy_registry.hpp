@@ -240,6 +240,33 @@ public:
         return entries;
     }
 
+    // Get grid entries with TP/SL params injected for Forex & Gold
+    static std::vector<StrategyGridEntry> getForexGridEntries() {
+        auto entries = getAllGridEntries();
+        
+        // For each strategy, multiply its param combos by TP/SL ranges
+        std::vector<double> tpValues = {3, 5, 10, 15, 20};
+        std::vector<double> slValues = {2, 3, 5, 10};
+        
+        for (auto& entry : entries) {
+            std::vector<ParamSet> expanded;
+            for (auto& baseParams : entry.paramCombinations) {
+                for (double tp : tpValues) {
+                    for (double sl : slValues) {
+                        if (tp <= sl) continue; // TP must be > SL for positive expectancy
+                        ParamSet p = baseParams;
+                        p["tp_pips"] = tp;
+                        p["sl_pips"] = sl;
+                        expanded.push_back(p);
+                    }
+                }
+            }
+            entry.paramCombinations = std::move(expanded);
+        }
+        
+        return entries;
+    }
+    
     // Count total parameter combinations across all strategies
     static int totalCombinations() {
         int total = 0;
