@@ -384,7 +384,9 @@ if (isset($_GET['action'])) {
                 
                 <div class="card flex-1">
                     <h3>Recent Performance (Last 10 Runs)</h3>
-                    <canvas id="dashboardChart" style="width: 100%; height: 380px; margin-top: 16px;"></canvas>
+                    <div style="position: relative; height: 380px; width: 100%; margin-top: 16px;">
+                        <canvas id="dashboardChart"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
@@ -460,7 +462,9 @@ if (isset($_GET['action'])) {
                     <h3 id="chart-title">Run Details</h3>
                     <button onclick="closeChart()">Close Chart</button>
                 </div>
-                <canvas id="myChart" style="width: 100%; height: 300px; margin-top: 16px;"></canvas>
+                <div style="position: relative; height: 300px; width: 100%; margin-top: 16px;">
+                    <canvas id="myChart"></canvas>
+                </div>
             </div>
             
             <div class="card" style="margin-top: 24px; display: none;" id="backtest-card">
@@ -477,7 +481,7 @@ if (isset($_GET['action'])) {
                         <tr>
                             <th>Run ID</th>
                             <th>Symbol</th>
-                            <th>Top Strategy</th>
+                            <th>Best Strategy (Rank 1)</th>
                             <th>Win Rate</th>
                             <th>Grid P&L</th>
                             <th>Agent P&L</th>
@@ -486,6 +490,30 @@ if (isset($_GET['action'])) {
                     </thead>
                     <tbody id="results-table-body">
                         <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- RANK EXPLORER MODAL -->
+            <div class="card" style="margin-top: 24px; display: none; background: #fafafa;" id="rank-explorer-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <h2 id="rank-explorer-title" style="margin: 0; padding: 0; border: none;">Run Details</h2>
+                    <button onclick="document.getElementById('rank-explorer-card').style.display='none'" style="background: #ccc; color: #333;">Close</button>
+                </div>
+                
+                <table style="background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                    <thead>
+                        <tr style="background: #f1f1f1;">
+                            <th>Rank</th>
+                            <th>Strategy</th>
+                            <th>Win Rate</th>
+                            <th>Net P&L</th>
+                            <th>Max Drawdown</th>
+                            <th>Parameters (Indicators)</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rank-explorer-body">
                     </tbody>
                 </table>
             </div>
@@ -631,6 +659,16 @@ if (isset($_GET['action'])) {
             checkStatus();
         }
 
+        function formatMoney(amount) {
+            const num = parseFloat(amount);
+            if (num < 0) {
+                return `<span style="color: #dc2626; font-weight: 600;">-$${Math.abs(num).toFixed(2)}</span>`;
+            } else if (num > 0) {
+                return `<span style="color: #16a34a; font-weight: 600;">+$${num.toFixed(2)}</span>`;
+            }
+            return `$0.00`;
+        }
+
         async function loadResults() {
             try {
                 const res = await fetch('?action=list_runs');
@@ -643,13 +681,13 @@ if (isset($_GET['action'])) {
                     tr.innerHTML = `
                         <td>${r.run_id}</td>
                         <td>${r.symbol}</td>
-                        <td>${r.top_strategy}</td>
-                        <td>${r.top_win_rate}%</td>
-                        <td>$${r.top_pnl}</td>
-                        <td>$${r.rl_pnl}</td>
+                        <td><strong>${r.top_strategy}</strong></td>
+                        <td>${parseFloat(r.top_win_rate).toFixed(1)}%</td>
+                        <td>${formatMoney(r.top_pnl)}</td>
+                        <td>${formatMoney(r.rl_pnl)}</td>
                         <td>
                             <button onclick="viewChart('${r.run_id}', '${r.symbol}')" style="padding:4px 8px; font-size:0.8rem;">Chart</button>
-                            <button onclick="runBacktest('${r.run_id}', '${r.symbol}')" style="padding:4px 8px; font-size:0.8rem; margin-left: 4px; background: #555;">Backtest</button>
+                            <button onclick="exploreRanks('${r.run_id}', '${r.symbol}')" style="padding:4px 8px; font-size:0.8rem; margin-left: 4px; background: #2563eb;">Explore Ranks</button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -699,16 +737,53 @@ if (isset($_GET['action'])) {
             document.getElementById('chart-card').style.display = 'none';
         }
 
-        async function runBacktest(runId, symbol) {
+        async function exploreRanks(runId, symbol) {
+            document.getElementById('rank-explorer-card').style.display = 'block';
+            document.getElementById('rank-explorer-title').textContent = `Top Strategies: ${runId} - ${symbol}`;
+            const tbody = document.getElementById('rank-explorer-body');
+            tbody.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
+            
+            try {
+                const res = await fetch(`?action=get_run_details&run_id=${runId}&symbol=${symbol}`);
+                const data = await res.json();
+                
+                tbody.innerHTML = '';
+                data.strategies.forEach(s => {
+                    // Format parameters nicely
+                    let paramsStr = '';
+                    for (const [key, value] of Object.entries(s.params)) {
+                        paramsStr += `<span style="background: #eef2ff; color: #4f46e5; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-right: 4px; display: inline-block; margin-bottom: 4px;">${key}: ${value}</span>`;
+                    }
+                    
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><strong>#${s.rank}</strong></td>
+                        <td>${s.strategyName}</td>
+                        <td>${parseFloat(s.winRatePct).toFixed(1)}%</td>
+                        <td>${formatMoney(s.netPnl)}</td>
+                        <td>${formatMoney(s.maxDrawdown)}</td>
+                        <td style="max-width: 300px;">${paramsStr}</td>
+                        <td>
+                            <button onclick="runBacktest('${runId}', '${symbol}', ${s.rank})" style="padding:4px 8px; font-size:0.8rem; background: #16a34a;">Backtest</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="7" style="color:red;">Failed to load ranks.</td></tr>';
+            }
+        }
+
+        async function runBacktest(runId, symbol, rank = 1) {
             const outDiv = document.getElementById('backtest-output');
             const card = document.getElementById('backtest-card');
             
             card.style.display = 'block';
-            outDiv.textContent = `Running backtest for ${symbol} using ${runId} (Rank 1). Please wait...`;
+            outDiv.innerHTML = `<span style="color: #666;">Running backtest for ${symbol} using ${runId} (Rank ${rank}). Please wait...</span>`;
             outDiv.scrollTop = 0;
             
             try {
-                const res = await fetch(`?action=run_backtest&run_id=${runId}&symbol=${symbol}&rank=1`);
+                const res = await fetch(`?action=run_backtest&run_id=${runId}&symbol=${symbol}&rank=${rank}`);
                 const data = await res.json();
                 outDiv.textContent = data.output || "No output returned.";
                 outDiv.scrollTop = outDiv.scrollHeight;
