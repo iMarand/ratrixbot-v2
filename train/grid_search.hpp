@@ -73,6 +73,7 @@ public:
         double payoutPct    = 0.95;
         int    minTrades    = 10;
         double lotSize      = 0.5;     // default 0.5 lot = $5/pip for forex
+        double spreadPips   = 0.0;
         std::string symbol;            // needed for forex/commodity detection
     };
     
@@ -112,20 +113,35 @@ public:
                 double slPips = params.at("sl_pips");
                 double tpDist = tpPips * pipSize;
                 double slDist = slPips * pipSize;
+                double spreadDist = cfg_.spreadPips * pipSize;
+
+                // Stop loss could be tighter than spread. If so, it's instantly hit at entry.
+                if (slDist <= spreadDist) {
+                    won = false;
+                    pnl = -(slPips * dollarPerPip);
+                    res.totalTrades++;
+                    res.losses++;
+                    equity += pnl;
+                    peak = std::max(peak, equity);
+                    maxDD = std::min(maxDD, equity - peak);
+                    currentStreak++;
+                    worstStreak = std::max(worstStreak, currentStreak);
+                    continue;
+                }
 
                 bool resolved = false;
                 for (size_t j = i + 1; j < n; j++) {
                     double move = prices[j] - prices[i];
                     if (sig == Signal::Fall) move = -move; // invert for sell
 
-                    if (move >= tpDist) {
+                    if (move >= (tpDist + spreadDist)) {
                         // TP hit
                         won = true;
                         pnl = tpPips * dollarPerPip;
                         resolved = true;
                         break;
                     }
-                    if (move <= -slDist) {
+                    if (move <= -(slDist - spreadDist)) {
                         // SL hit
                         won = false;
                         pnl = -(slPips * dollarPerPip);

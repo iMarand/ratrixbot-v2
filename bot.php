@@ -114,6 +114,7 @@ if (isset($_GET['action'])) {
             if (!empty($_POST['tp'])) $cmd .= " --tp " . (float)$_POST['tp'];
             if (!empty($_POST['sl'])) $cmd .= " --sl " . (float)$_POST['sl'];
             if (!empty($_POST['lot'])) $cmd .= " --lot " . (float)$_POST['lot'];
+            if (!empty($_POST['spread'])) $cmd .= " --spread " . (float)$_POST['spread'];
             if (isset($_POST['autoadjust']) && $_POST['autoadjust'] == 'true') {
                 $cmd .= " --autoadjust";
             }
@@ -186,12 +187,9 @@ if (isset($_GET['action'])) {
         $trained_on = escapeshellarg($_GET['trained_on'] ?? '');
         $rank = (int)($_GET['rank'] ?? 1);
         $count = (int)($_GET['count'] ?? 5000);
+        $spread = (float)($_GET['spread'] ?? 0.0);
         
-        // Use the new `--load-run` semantics: if --trained-on is not provided, it assumes symbol. 
-        // We will pass the symbol it was trained on if it's different.
-        $cmd = "./derivbot --mode backtest --symbol $symbol --load-run $run_id --rank $rank --count $count";
-        // To allow testing on a different symbol than it was trained on, we need a way to tell derivbot where to find the summary.json.
-        // I will add `--trained-on $trained_on` to the command line.
+        $cmd = "./derivbot --mode backtest --symbol $symbol --load-run $run_id --rank $rank --count $count --spread $spread";
         if ($_GET['trained_on'] ?? '') {
             $cmd .= " --trained-on " . $trained_on;
         }
@@ -491,6 +489,10 @@ if (isset($_GET['action'])) {
                                 <label>Lot Size</label>
                                 <input type="text" id="train-lot" value="0.5">
                             </div>
+                            <div class="form-group flex-1">
+                                <label>Spread (Pips)</label>
+                                <input type="number" id="train-spread" value="2.0" step="0.1">
+                            </div>
                         </div>
                     </div>
                     
@@ -616,6 +618,10 @@ if (isset($_GET['action'])) {
                             <option value="50000">50,000 Ticks (~2 weeks)</option>
                             <option value="100000">100,000 Ticks (~1 month)</option>
                         </select>
+                    </div>
+                    <div style="flex: 1; min-width: 100px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500;">Spread</label>
+                        <input type="number" id="backtest-spread" value="2.0" step="0.1">
                     </div>
                     <div style="margin-top: 28px;">
                         <button onclick="executeConfiguredBacktest()" style="background: #16a34a; padding: 10px 24px; font-size: 1rem;">Start Backtest</button>
@@ -822,6 +828,7 @@ if (isset($_GET['action'])) {
                 formData.append('tp', document.getElementById('train-tp').value);
                 formData.append('sl', document.getElementById('train-sl').value);
                 formData.append('lot', document.getElementById('train-lot').value);
+                formData.append('spread', document.getElementById('train-spread').value);
             }
 
             try {
@@ -1006,7 +1013,8 @@ if (isset($_GET['action'])) {
                 // Wait, if `--symbol targetSymbol` is passed to C++, `--load-run` will look for `resultsDir/run_id/targetSymbol/summary.json`.
                 // If it was trained on JD10, and we test on R_75, it will fail to load unless we pass the seed-symbol.
                 // Let's modify the C++ call in PHP to handle this if needed, or we can just pass the currentBacktestSymbol as a new parameter to `?action=run_backtest`.
-                const res = await fetch(`?action=run_backtest&run_id=${currentBacktestRunId}&symbol=${targetSymbol}&trained_on=${currentBacktestSymbol}&rank=${currentBacktestRank}&count=${count}`);
+                const spread = document.getElementById('backtest-spread') ? document.getElementById('backtest-spread').value : 0;
+                const res = await fetch(`?action=run_backtest&run_id=${currentBacktestRunId}&symbol=${targetSymbol}&trained_on=${currentBacktestSymbol}&rank=${currentBacktestRank}&count=${count}&spread=${spread}`);
                 const data = await res.json();
                 outDiv.textContent = data.output || "No output returned.";
                 outDiv.scrollTop = outDiv.scrollHeight;

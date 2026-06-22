@@ -284,6 +284,7 @@ struct BacktestConfig {
     double lotSize = 0.5;
     double tpPips = 0.0;
     double slPips = 0.0;
+    double spreadPips = 0.0;
     int cooldownSec = 0;
     std::string csvOut = "backtest_trades.csv";
     int maxConsecLosses = 0; // 0 = no limit; otherwise stop opening new trades after N losses in a row
@@ -435,31 +436,38 @@ BacktestResult runBacktest(const BacktestConfig& cfg,
             double pipSize = getPipSize(cfg.symbol);
             double tpDist = cfg.tpPips * pipSize;
             double slDist = cfg.slPips * pipSize;
-            double dollarPerPip = cfg.lotSize * 10.0;
+            double spreadDist = cfg.spreadPips * pipSize;
+            
+            if (slDist <= spreadDist) {
+                t.exitTime = entryTime;
+                t.exitPrice = entryPrice; // instantly filled
+                t.won = false;
+                t.pnl = -(cfg.slPips * dollarPerPip);
+            } else {
+                bool resolved = false;
+                for (size_t j = i + 1; j < n; j++) {
+                    double move = prices[j] - entryPrice;
+                    if (sig == Signal::Fall) move = -move; // invert for sell
 
-            bool resolved = false;
-            for (size_t j = i + 1; j < n; j++) {
-                double move = prices[j] - entryPrice;
-                if (sig == Signal::Fall) move = -move; // invert for sell
-
-                if (move >= tpDist) {
-                    t.exitTime = times[j];
-                    t.exitPrice = prices[j];
-                    t.won = true;
-                    t.pnl = cfg.tpPips * dollarPerPip;
-                    resolved = true;
-                    break;
+                    if (move >= (tpDist + spreadDist)) {
+                        t.exitTime = times[j];
+                        t.exitPrice = (sig == Signal::Rise) ? (entryPrice + tpDist) : (entryPrice - tpDist);
+                        t.won = true;
+                        t.pnl = cfg.tpPips * dollarPerPip;
+                        resolved = true;
+                        break;
+                    }
+                    if (move <= -(slDist - spreadDist)) {
+                        t.exitTime = times[j];
+                        t.exitPrice = (sig == Signal::Rise) ? (entryPrice - slDist) : (entryPrice + slDist);
+                        t.won = false;
+                        t.pnl = -(cfg.slPips * dollarPerPip);
+                        resolved = true;
+                        break;
+                    }
                 }
-                if (move <= -slDist) {
-                    t.exitTime = times[j];
-                    t.exitPrice = prices[j];
-                    t.won = false;
-                    t.pnl = -(cfg.slPips * dollarPerPip);
-                    resolved = true;
-                    break;
-                }
+                if (!resolved) continue; // skip unresolved trades
             }
-            if (!resolved) continue; // skip unresolved trades
         } else {
             int64_t targetExitTime = entryTime + cfg.durationSec;
             size_t j = i + 1;
@@ -565,6 +573,7 @@ struct PaperTradeConfig {
     double lotSize = 0.5;
     double tpPips = 0.0;
     double slPips = 0.0;
+    double spreadPips = 0.0;
     int cooldownSec = 0;
     std::string csvOut = "paper_trades.csv";
     int maxTrades = 0;
@@ -954,6 +963,7 @@ int main(int argc, char** argv) {
     int seedRank = 0;
     double lotSize = 0.5;
     double tpPips = 0, slPips = 0;
+    double spreadPips = 0.0;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -1004,6 +1014,7 @@ int main(int argc, char** argv) {
         else if (arg == "--lot") { lotSize = std::stod(next()); }
         else if (arg == "--tp") { tpPips = std::stod(next()); }
         else if (arg == "--sl") { slPips = std::stod(next()); }
+        else if (arg == "--spread") { spreadPips = std::stod(next()); }
         else if (arg == "--list-symbols") { mode = "list-symbols"; }
         else if (arg == "--help") { printUsage(); return 0; }
         else { std::cerr << "Unknown argument: " << arg << "\n"; printUsage(); return 1; }
@@ -1079,6 +1090,7 @@ int main(int argc, char** argv) {
         tCfg.stake = stake;
         tCfg.payoutPct = payout;
         tCfg.lotSize = lotSize;
+        tCfg.spreadPips = spreadPips;
         tCfg.resultsDir = resultsDir;
         tCfg.autoAdjust = autoAdjust;
         tCfg.trainHours = trainHours;
