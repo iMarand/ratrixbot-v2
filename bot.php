@@ -936,18 +936,26 @@ if (isset($_GET['action'])) {
                     // Extract duration from params or show default
                     let duration = s.params.trade_duration ? s.params.trade_duration + 's' : '15s';
                     
-                    // Format parameters nicely (exclude trade_duration since it has its own column)
-                    let paramsStr = '';
-                    for (const [key, value] of Object.entries(s.params)) {
-                        if (key === 'trade_duration') continue;
-                        paramsStr += `<span style="background: #eef2ff; color: #4f46e5; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-right: 4px; display: inline-block; margin-bottom: 4px;">${key}: ${value}</span>`;
+                    // Clean up params string and handle Forex TP/SL duration display
+                    let durationStr = '15s';
+                    if (s.params.tp_pips && s.params.sl_pips) {
+                        durationStr = `TP: ${parseFloat(s.params.tp_pips).toFixed(1)} / SL: ${parseFloat(s.params.sl_pips).toFixed(1)}`;
+                    } else if (s.params.trade_duration) {
+                        durationStr = s.params.trade_duration + 's';
                     }
+
+                    let paramsStr = Object.keys(s.params).map(k => {
+                        if (k === 'trade_duration' || k === 'tp_pips' || k === 'sl_pips') return ''; // don't show these in params column since they are in duration column
+                        let val = s.params[k];
+                        if (typeof val === 'number') val = val.toFixed(val % 1 === 0 ? 0 : 2);
+                        return `<b>${k}</b>: ${val}`;
+                    }).filter(x => x !== '').join('<br>');
                     
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td><strong>#${s.rank}</strong></td>
                         <td>${s.strategyName}</td>
-                        <td><span style="background: #f0fdf4; color: #166534; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem;">${duration}</span></td>
+                        <td><span style="background: #f0fdf4; color: #166534; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem;">${durationStr}</span></td>
                         <td>${parseFloat(s.winRatePct).toFixed(1)}%</td>
                         <td>${formatMoney(s.netPnl)}</td>
                         <td>${formatMoney(s.maxDrawdown)}</td>

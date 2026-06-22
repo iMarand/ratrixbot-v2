@@ -282,20 +282,23 @@ public:
     static std::vector<StrategyGridEntry> getForexGridEntries(
         const std::vector<std::string>& allowedStrategies = {},
         const std::vector<double>& tradeDurations = {},
-        const std::vector<double>& candlePeriods = {}
+        const std::vector<double>& candlePeriods = {},
+        double baseTp = 0.0,
+        double baseSl = 0.0
     ) {
         auto entries = getAllGridEntries(allowedStrategies, tradeDurations, candlePeriods);
         
-        // For each strategy, multiply its param combos by TP/SL ranges
-        std::vector<double> tpValues = {3, 5, 10, 15, 20};
-        std::vector<double> slValues = {2, 3, 5, 10};
+        std::vector<double> tpValues = (baseTp > 0.0) ? std::vector<double>{baseTp} : std::vector<double>{3, 5, 10, 15, 20};
+        std::vector<double> slValues = (baseSl > 0.0) ? std::vector<double>{baseSl} : std::vector<double>{2, 3, 5, 10};
         
         for (auto& entry : entries) {
             std::vector<ParamSet> expanded;
             for (auto& baseParams : entry.paramCombinations) {
                 for (double tp : tpValues) {
                     for (double sl : slValues) {
-                        if (tp <= sl) continue; // TP must be > SL for positive expectancy
+                        // If the user explicitly provided TP and SL, don't skip them even if TP <= SL (let them test inverse risk if they really want)
+                        if (baseTp == 0.0 && baseSl == 0.0 && tp <= sl) continue; 
+                        
                         ParamSet p = baseParams;
                         p["tp_pips"] = tp;
                         p["sl_pips"] = sl;

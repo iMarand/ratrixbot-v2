@@ -43,6 +43,8 @@ struct TrainConfig {
     std::vector<double>      durations;
     std::vector<double>      candlePeriods;
     bool        skipRL       = false;
+    double      baseTp       = 0.0;
+    double      baseSl       = 0.0;
 };
 
 class TrainEngine {
@@ -93,7 +95,7 @@ private:
         
         GridSearchEngine gs(gsCfg);
         auto allGrid = isForexOrCommodity(symbol) 
-            ? StrategyRegistry::getForexGridEntries(cfg_.allowedStrategies, cfg_.durations, cfg_.candlePeriods) 
+            ? StrategyRegistry::getForexGridEntries(cfg_.allowedStrategies, cfg_.durations, cfg_.candlePeriods, cfg_.baseTp, cfg_.baseSl) 
             : StrategyRegistry::getAllGridEntries(cfg_.allowedStrategies, cfg_.durations, cfg_.candlePeriods);
         
         // If seeding, inject the seed strategy's params + neighbors into the grid

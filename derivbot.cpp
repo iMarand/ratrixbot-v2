@@ -496,6 +496,23 @@ BacktestResult runBacktest(const BacktestConfig& cfg,
     }
     csv.close();
 
+    std::cout << "\n--- Last " << std::min((int)trades.size(), 20) << " Trades Ledger ---\n";
+    int startIdx = std::max(0, (int)trades.size() - 20);
+    for (int i = startIdx; i < (int)trades.size(); i++) {
+        const auto& t = trades[i];
+        std::cout << "Entry: " << t.entryPrice << " -> Exit: " << t.exitPrice 
+                  << " | " << Trade::dirName(t.direction) 
+                  << " | " << (t.won ? "WIN" : "LOSS")
+                  << " | PnL: $" << t.pnl;
+        if (isForexOrCommodity(cfg.symbol) && cfg.lotSize > 0) {
+            double dollarPerPip = cfg.lotSize * 10.0;
+            double pips = t.pnl / dollarPerPip;
+            std::cout << " (" << pips << " pips)";
+        }
+        std::cout << "\n";
+    }
+    std::cout << "---------------------------------\n";
+
     if (riskControlTripped) {
         std::cout << "Risk control engaged " << skippedByRiskControl
                    << " time(s): skipped opening new trades while on a losing"
@@ -1072,6 +1089,8 @@ int main(int argc, char** argv) {
         if (!durationsStr.empty()) tCfg.durations = parseCsvDouble(durationsStr);
         if (!candlesStr.empty()) tCfg.candlePeriods = parseCsvDouble(candlesStr);
         tCfg.skipRL = skipRL;
+        tCfg.baseTp = tpPips;
+        tCfg.baseSl = slPips;
 
         std::string runDir = ReportGenerator::createResultsDir(tCfg.resultsDir);
         std::cout << "Results will be saved to: " << runDir << "\n";
