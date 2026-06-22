@@ -184,8 +184,9 @@ if (isset($_GET['action'])) {
         $run_id = escapeshellarg($_GET['run_id'] ?? '');
         $symbol = escapeshellarg($_GET['symbol'] ?? '');
         $rank = (int)($_GET['rank'] ?? 1);
+        $count = (int)($_GET['count'] ?? 5000);
         
-        $cmd = "./derivbot --mode backtest --symbol $symbol --load-run $run_id --rank $rank";
+        $cmd = "./derivbot --mode backtest --symbol $symbol --load-run $run_id --rank $rank --count $count";
         $output = shell_exec($cmd . " 2>&1");
         
         echo json_encode(["output" => $output]);
@@ -564,11 +565,27 @@ if (isset($_GET['action'])) {
             </div>
             
             <div class="card" style="margin-top: 24px; display: none;" id="backtest-card">
-                <div style="display: flex; justify-content: space-between;">
-                    <h3>Backtest Output</h3>
-                    <button onclick="document.getElementById('backtest-card').style.display = 'none'">Close</button>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 16px;">
+                    <h3 style="margin: 0;">Backtest Configuration & Output</h3>
+                    <button onclick="document.getElementById('backtest-card').style.display = 'none'" style="background: #ccc; color: #333;">Close</button>
                 </div>
-                <div class="terminal" id="backtest-output" style="height: 300px; margin-top: 16px;"></div>
+                
+                <div id="backtest-config" style="background: #fafafa; border: 1px solid var(--border-color); padding: 16px; border-radius: 6px; margin-bottom: 16px; display: flex; gap: 16px; align-items: center;">
+                    <div style="flex: 1;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500;">History Length</label>
+                        <select id="backtest-ticks-select" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: white;">
+                            <option value="5000">5,000 Ticks</option>
+                            <option value="10000" selected>10,000 Ticks</option>
+                            <option value="50000">50,000 Ticks (~2 weeks)</option>
+                            <option value="100000">100,000 Ticks (~1 month)</option>
+                        </select>
+                    </div>
+                    <div style="margin-top: 28px;">
+                        <button onclick="executeConfiguredBacktest()" style="background: #16a34a; padding: 10px 24px; font-size: 1rem;">Start Backtest</button>
+                    </div>
+                </div>
+
+                <div class="terminal" id="backtest-output" style="height: 400px; overflow-y: auto;"></div>
             </div>
             
             <div class="card">
@@ -899,7 +916,7 @@ if (isset($_GET['action'])) {
                         <td>${formatMoney(s.maxDrawdown)}</td>
                         <td style="max-width: 300px;">${paramsStr}</td>
                         <td>
-                            <button onclick="runBacktest('${runId}', '${symbol}', ${s.rank})" style="padding:4px 8px; font-size:0.8rem; background: #16a34a;">Backtest</button>
+                            <button onclick="openBacktestModal('${runId}', '${symbol}', ${s.rank})" style="padding:4px 8px; font-size:0.8rem; background: #16a34a;">Backtest</button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -909,16 +926,33 @@ if (isset($_GET['action'])) {
             }
         }
 
-        async function runBacktest(runId, symbol, rank = 1) {
-            const outDiv = document.getElementById('backtest-output');
+        let currentBacktestRunId = '';
+        let currentBacktestSymbol = '';
+        let currentBacktestRank = 1;
+
+        function openBacktestModal(runId, symbol, rank = 1) {
+            currentBacktestRunId = runId;
+            currentBacktestSymbol = symbol;
+            currentBacktestRank = rank;
+            
             const card = document.getElementById('backtest-card');
+            const outDiv = document.getElementById('backtest-output');
             
             card.style.display = 'block';
-            outDiv.innerHTML = `<span style="color: #666;">Running backtest for ${symbol} using ${runId} (Rank ${rank}). Please wait...</span>`;
+            outDiv.innerHTML = `<span style="color: #666;">Ready to backtest ${symbol} using ${runId} (Rank ${rank}). Select history length and click Start.</span>`;
+            
+            card.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function executeConfiguredBacktest() {
+            const count = document.getElementById('backtest-ticks-select').value;
+            const outDiv = document.getElementById('backtest-output');
+            
+            outDiv.innerHTML = `<span style="color: #666;">Fetching ${count} ticks and running backtest for ${currentBacktestSymbol}... Please wait...</span>`;
             outDiv.scrollTop = 0;
             
             try {
-                const res = await fetch(`?action=run_backtest&run_id=${runId}&symbol=${symbol}&rank=${rank}`);
+                const res = await fetch(`?action=run_backtest&run_id=${currentBacktestRunId}&symbol=${currentBacktestSymbol}&rank=${currentBacktestRank}&count=${count}`);
                 const data = await res.json();
                 outDiv.textContent = data.output || "No output returned.";
                 outDiv.scrollTop = outDiv.scrollHeight;
