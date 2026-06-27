@@ -1,0 +1,13 @@
+InpStrategy=1
+InpUseTrendAlign=false
+InpUseADX=false
+InpRSIPeriod=14
+InpRSIOS=30
+InpRSIOB=70
+InpStopLossPoints=400
+InpTakeProfitPoints=600
+InpUseTrailing=true
+InpBreakEvenPoints=250
+InpTrailPoints=250
+InpUseRiskPercent=true
+InpRiskPercent=1.0

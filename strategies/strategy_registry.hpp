@@ -6,7 +6,8 @@
 #include "stochastic_strategy.hpp"
 #include "multi_confluence.hpp"
 #include "price_action_strategy.hpp"
-#include "candle_decision_tree.hpp"
+#include "random_forest.hpp"
+#include "xgboost_strategy.hpp"
 #include "../rsi.hpp"
 #include <vector>
 #include <functional>
@@ -29,19 +30,20 @@ public:
     RsiThresholdStrategyAdapter(int period, double oversold, double overbought)
         : rsi_(period), period_(period), oversold_(oversold), overbought_(overbought) {}
 
+    // Rebound (exit-of-zone) entry: arm inside the zone, fire when RSI leaves
+    // it. Overbought rebound -> SELL, oversold rebound -> BUY. Kept identical
+    // to RsiThresholdStrategy in derivbot.cpp so training matches live trading.
     Signal onPrice(int64_t /*time*/, double price) override {
         auto value = rsi_.update(price);
         if (!value.has_value()) return Signal::None;
         double r = *value;
         Signal sig = Signal::None;
 
-        if (r <= oversold_ && !osArm_) { sig = Signal::Rise; osArm_ = true; }
-        else if (r > oversold_) osArm_ = false;
+        if (r >= overbought_) { inOb_ = true; }
+        else if (inOb_) { sig = Signal::Fall; inOb_ = false; }
 
-        if (r >= overbought_ && !obArm_) {
-            if (sig == Signal::None) sig = Signal::Fall;
-            obArm_ = true;
-        } else if (r < overbought_) obArm_ = false;
+        if (r <= oversold_) { inOs_ = true; }
+        else if (inOs_) { if (sig == Signal::None) sig = Signal::Rise; inOs_ = false; }
 
         lastRsi_ = r;
         return sig;
@@ -59,7 +61,7 @@ private:
     RSI    rsi_;
     int    period_;
     double oversold_, overbought_;
-    bool   osArm_ = false, obArm_ = false;
+    bool   inOs_ = false, inOb_ = false;
     double lastRsi_ = 50.0;
 };
 
@@ -251,25 +253,61 @@ public:
             entries.push_back(std::move(e));
         }
 
-        // 8. Candle Decision Tree
-        if (isAllowed("candle_tree")) {
+        // 8. Random Forest (bagged classification trees)
+        if (isAllowed("random_forest")) {
             StrategyGridEntry e;
-            e.name = "candle_tree";
+            e.name = "random_forest";
             e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
                 int cp = (int)p.at("candle_period");
+                int nt = (int)p.at("num_trees");
                 int md = (int)p.at("max_depth");
                 int ms = (int)p.at("min_samples");
+                double vt = p.at("vote_threshold");
                 int td = p.count("trade_duration") ? (int)p.at("trade_duration") : 15;
-                return std::make_unique<CandleDecisionTreeStrategy>(cp, md, ms, td);
+                return std::make_unique<RandomForestStrategy>(cp, nt, md, ms, vt, td);
             };
-            
-            std::vector<double> activeCandles = candlePeriods.empty() ? std::vector<double>{5, 10, 15, 30} : candlePeriods;
-            std::vector<double> activeDurations = tradeDurations.empty() ? std::vector<double>{15, 30, 60} : tradeDurations;
-            
+
+            std::vector<double> activeCandles = candlePeriods.empty() ? std::vector<double>{10, 15, 30} : candlePeriods;
+            std::vector<double> activeDurations = tradeDurations.empty() ? std::vector<double>{10, 15, 30, 60} : tradeDurations;
+
+            // Higher vote_threshold => only act when most trees agree =>
+            // fewer, higher-conviction trades and shorter loss streaks.
             e.paramCombinations = detail::cartesian({
-                {"candle_period", activeCandles},
-                {"max_depth", {2, 3, 4}},
-                {"min_samples", {5, 10}},
+                {"candle_period",  activeCandles},
+                {"num_trees",      {30}},
+                {"max_depth",      {3, 4}},
+                {"min_samples",    {10}},
+                {"vote_threshold", {0.60, 0.67, 0.75}},
+                {"trade_duration", activeDurations}
+            });
+            entries.push_back(std::move(e));
+        }
+
+        // 9. XGBoost (gradient-boosted trees)
+        if (isAllowed("xgboost")) {
+            StrategyGridEntry e;
+            e.name = "xgboost";
+            e.factory = [](const ParamSet& p) -> std::unique_ptr<StrategyBase> {
+                int cp = (int)p.at("candle_period");
+                int nr = (int)p.at("n_rounds");
+                int md = (int)p.at("max_depth");
+                double lr = p.at("learning_rate");
+                double pm = p.at("prob_margin");
+                int td = p.count("trade_duration") ? (int)p.at("trade_duration") : 15;
+                return std::make_unique<XGBoostStrategy>(cp, nr, md, lr, pm, td);
+            };
+
+            std::vector<double> activeCandles = candlePeriods.empty() ? std::vector<double>{10, 15, 30} : candlePeriods;
+            std::vector<double> activeDurations = tradeDurations.empty() ? std::vector<double>{10, 15, 30, 60} : tradeDurations;
+
+            // Larger prob_margin => only act when the model is confident the
+            // probability is well away from 0.5 => fewer, better trades.
+            e.paramCombinations = detail::cartesian({
+                {"candle_period",  activeCandles},
+                {"n_rounds",       {40}},
+                {"max_depth",      {3}},
+                {"learning_rate",  {0.1, 0.3}},
+                {"prob_margin",    {0.07, 0.12}},
                 {"trade_duration", activeDurations}
             });
             entries.push_back(std::move(e));

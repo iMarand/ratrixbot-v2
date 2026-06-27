@@ -1,0 +1,8 @@
+InpMinScore=4
+InpStopLossPoints=180
+InpTakeProfitPoints=350
+InpUseTrailing=true
+InpBreakEvenPoints=150
+InpTrailPoints=150
+InpUseRiskPercent=true
+InpRiskPercent=1.0

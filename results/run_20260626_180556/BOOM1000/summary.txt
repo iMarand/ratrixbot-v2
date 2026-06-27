@@ -1,0 +1,92 @@
+========================================
+ Training Summary for BOOM1000
+========================================
+
+[Top 10 Grid Search Strategies]
+
+Rank 1: xgboost (candle_period=15.000000, learning_rate=0.100000, max_depth=3.000000, n_rounds=40.000000, prob_margin=0.070000, trade_duration=15.000000)
+  Score:      1089.56
+  P&L:        604.85
+  Win Rate:   99.0755%
+  Trades:     649
+  Max DD:     -1
+  Max Streak: 1 losses in a row
+
+Rank 2: random_forest (candle_period=15.000000, max_depth=3.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.670000)
+  Score:      1089.56
+  P&L:        604.85
+  Win Rate:   99.0755%
+  Trades:     649
+  Max DD:     -1
+  Max Streak: 1 losses in a row
+
+Rank 3: random_forest (candle_period=15.000000, max_depth=3.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.750000)
+  Score:      1089.56
+  P&L:        604.85
+  Win Rate:   99.0755%
+  Trades:     649
+  Max DD:     -1
+  Max Streak: 1 losses in a row
+
+Rank 4: xgboost (candle_period=15.000000, learning_rate=0.100000, max_depth=3.000000, n_rounds=40.000000, prob_margin=0.120000, trade_duration=15.000000)
+  Score:      1089.56
+  P&L:        604.85
+  Win Rate:   99.0755%
+  Trades:     649
+  Max DD:     -1
+  Max Streak: 1 losses in a row
+
+Rank 5: random_forest (candle_period=15.000000, max_depth=4.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.600000)
+  Score:      1089.56
+  P&L:        604.85
+  Win Rate:   99.0755%
+  Trades:     649
+  Max DD:     -1
+  Max Streak: 1 losses in a row
+
+Rank 6: random_forest (candle_period=15.000000, max_depth=4.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.670000)
+  Score:      1089.56
+  P&L:        604.85
+  Win Rate:   99.0755%
+  Trades:     649
+  Max DD:     -1
+  Max Streak: 1 losses in a row
+
+Rank 7: random_forest (candle_period=15.000000, max_depth=3.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.600000)
+  Score:      1089.56
+  P&L:        604.85
+  Win Rate:   99.0755%
+  Trades:     649
+  Max DD:     -1
+  Max Streak: 1 losses in a row
+
+Rank 8: random_forest (candle_period=15.000000, max_depth=4.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.750000)
+  Score:      1089.56
+  P&L:        604.85
+  Win Rate:   99.0755%
+  Trades:     649
+  Max DD:     -1
+  Max Streak: 1 losses in a row
+
+Rank 9: xgboost (candle_period=15.000000, learning_rate=0.300000, max_depth=3.000000, n_rounds=40.000000, prob_margin=0.070000, trade_duration=15.000000)
+  Score:      1089.56
+  P&L:        604.85
+  Win Rate:   99.0755%
+  Trades:     649
+  Max DD:     -1
+  Max Streak: 1 losses in a row
+
+Rank 10: xgboost (candle_period=15.000000, learning_rate=0.300000, max_depth=3.000000, n_rounds=40.000000, prob_margin=0.120000, trade_duration=15.000000)
+  Score:      1089.56
+  P&L:        604.85
+  Win Rate:   99.0755%
+  Trades:     649
+  Max DD:     -1
+  Max Streak: 1 losses in a row
+
+[RL Agent Training]
+
+  Total updates:  0
+  States visited: 0 (out of 54)
+  Final Epsilon:  0
+  Total P&L:      0 (0/0)

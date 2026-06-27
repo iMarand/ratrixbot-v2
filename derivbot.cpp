@@ -3,11 +3,15 @@
 //
 // Single-file build using Boost.Beast (WebSocket+TLS) and nlohmann::json.
 //
-// SCOPE: this tool only ever sends "ticks_history" (historical data) and
-// "ticks"+"subscribe" (live feed) requests to Deriv. There is no buy/sell/
-// proposal call anywhere in this file and no API token is used. Paper
-// trading positions are tracked purely in local memory/CSV -- no real
-// orders are ever placed and no real money is ever at risk.
+// SCOPE: backtest and paper modes only ever send "ticks_history" (historical
+// data) and "ticks"+"subscribe" (live feed) requests -- no orders, no token,
+// nothing at risk.
+//
+// The "--mode live" path DOES place real orders: it authorizes with a Deriv
+// API token (--token) and buys MULTUP/MULTDOWN multiplier contracts with
+// stop-loss / take-profit, plus a bot-side trailing stop. This is intended for
+// a Deriv *demo (virtual)* account token so it can run unattended on a Linux
+// VPS. Use a demo token. Real-money tokens trade real money -- your risk.
 //
 // Build (MSYS2 MinGW64), with boost + openssl + nlohmann-json installed:
 //   pacman -S mingw-w64-x86_64-boost mingw-w64-x86_64-openssl mingw-w64-x86_64-nlohmann-json
@@ -33,6 +37,8 @@
 #include "strategies/bollinger_strategy.hpp"
 #include "strategies/stochastic_strategy.hpp"
 #include "strategies/multi_confluence.hpp"
+#include "strategies/random_forest.hpp"
+#include "strategies/xgboost_strategy.hpp"
 #include "train/train_engine.hpp"
 #include "train/results_manager.hpp"
 
@@ -51,6 +57,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <chrono>
+#include <cstdlib>
 
 // Helper to parse comma-separated strings
 static std::vector<std::string> parseCsvString(const std::string& s) {
@@ -89,6 +96,12 @@ public:
     RsiThresholdStrategy(int rsiPeriod, double oversold, double overbought)
         : rsi_(rsiPeriod), oversold_(oversold), overbought_(overbought) {}
 
+    // Rebound (exit-of-zone) entry. Instead of firing the instant RSI touches
+    // an extreme, we ARM when price pushes RSI into the zone, then fire only
+    // once RSI rebounds back out of the zone -- i.e. the move is actually
+    // reversing. Overbought -> rebound down -> SELL (Fall); oversold ->
+    // rebound up -> BUY (Rise). This tends to avoid entering against a strong
+    // trend that just keeps pushing the extreme further.
     Signal onPrice(double price) {
         auto value = rsi_.update(price);
         if (!value.has_value()) return Signal::None;
@@ -96,18 +109,22 @@ public:
         double rsiVal = *value;
         Signal signal = Signal::None;
 
-        if (rsiVal <= oversold_ && !oversoldArmed_) {
-            signal = Signal::Rise;
-            oversoldArmed_ = true;
-        } else if (rsiVal > oversold_) {
-            oversoldArmed_ = false;
+        // Overbought rebound -> SELL
+        if (rsiVal >= overbought_) {
+            inOverbought_ = true;
+        } else if (inOverbought_) {
+            // RSI has rebounded back below the overbought line
+            signal = Signal::Fall;
+            inOverbought_ = false;
         }
 
-        if (rsiVal >= overbought_ && !overboughtArmed_) {
-            if (signal == Signal::None) signal = Signal::Fall;
-            overboughtArmed_ = true;
-        } else if (rsiVal < overbought_) {
-            overboughtArmed_ = false;
+        // Oversold rebound -> BUY
+        if (rsiVal <= oversold_) {
+            inOversold_ = true;
+        } else if (inOversold_) {
+            // RSI has rebounded back above the oversold line
+            if (signal == Signal::None) signal = Signal::Rise;
+            inOversold_ = false;
         }
 
         lastRsi_ = rsiVal;
@@ -121,8 +138,8 @@ private:
     RSI rsi_;
     double oversold_;
     double overbought_;
-    bool oversoldArmed_ = false;
-    bool overboughtArmed_ = false;
+    bool inOversold_ = false;
+    bool inOverbought_ = false;
     double lastRsi_ = 50.0;
 };
 
@@ -158,6 +175,7 @@ private:
 enum class Direction { Rise, Fall };
 
 struct Trade {
+    size_t  entryIdx = 0;   // index into the tick arrays (for horizon analysis)
     int64_t entryTime = 0;
     double  entryPrice = 0.0;
     int64_t exitTime = 0;
@@ -399,7 +417,8 @@ bool fetchTickHistory(DerivWsClient& client, const std::string& symbol, int tota
 BacktestResult runBacktest(const BacktestConfig& cfg,
                             const std::vector<int64_t>& times,
                             const std::vector<double>& prices,
-                            std::function<Signal(int64_t, double)> strategyFn) {
+                            std::function<Signal(int64_t, double)> strategyFn,
+                            std::vector<Trade>* outTrades = nullptr) {
     std::vector<Trade> trades;
 
     int currentConsecLosses = 0;
@@ -424,6 +443,7 @@ BacktestResult runBacktest(const BacktestConfig& cfg,
         int64_t entryTime = times[i];
         double entryPrice = prices[i];
         Trade t;
+        t.entryIdx = i;
         t.entryTime = entryTime;
         t.entryPrice = entryPrice;
         t.direction = (sig == Signal::Rise) ? Direction::Rise : Direction::Fall;
@@ -537,7 +557,88 @@ BacktestResult runBacktest(const BacktestConfig& cfg,
     result.winRatePct = result.totalTrades > 0 ? (100.0 * wins / result.totalTrades) : 0.0;
     result.maxConsecLossStreak = maxStreak;
     result.tradesSkippedByRiskControl = skippedByRiskControl;
+    if (outTrades) *outTrades = trades;
     return result;
+}
+
+// ============================================================================
+// Multi-horizon "what happened after entry" analysis.
+//
+// For every trade taken, re-checks the outcome if the contract had instead
+// expired at +10s / +15s / +30s / +60s. This answers the exact question:
+// "we lost at the chosen duration -- but did the market move into our favour a
+// few seconds later?" If many losers would have won at a longer horizon, the
+// duration is too short (or entries are slightly early); if a shorter horizon
+// already wins more, holding longer is just giving profit back.
+// ============================================================================
+
+void analyzeHorizons(const std::vector<int64_t>& times,
+                     const std::vector<double>& prices,
+                     const std::vector<Trade>& trades,
+                     const BacktestConfig& cfg) {
+    if (trades.empty()) return;
+
+    const std::vector<int> horizons = {10, 15, 30, 60};
+    size_t n = prices.size();
+
+    auto outcomeAt = [&](const Trade& t, int horizon, bool& resolved) -> bool {
+        int64_t target = t.entryTime + horizon;
+        size_t j = t.entryIdx + 1;
+        while (j < n && times[j] < target) j++;
+        if (j >= n) { resolved = false; return false; }
+        resolved = true;
+        bool up = prices[j] > t.entryPrice;
+        bool down = prices[j] < t.entryPrice;
+        return (t.direction == Direction::Rise) ? up : down; // tie = loss
+    };
+
+    std::cout << "\n--- Multi-horizon outcome analysis (chosen duration = "
+              << cfg.durationSec << "s) ---\n";
+    std::cout << "Horizon |  trades |  wins | win% |   net P&L | vs chosen: rescued losers\n";
+
+    for (int h : horizons) {
+        int resolvedTrades = 0, wins = 0, rescued = 0;
+        double net = 0.0;
+        for (const auto& t : trades) {
+            bool resolved = false;
+            bool won = outcomeAt(t, h, resolved);
+            if (!resolved) continue;
+            resolvedTrades++;
+            if (won) wins++;
+            net += won ? (cfg.stake * cfg.payoutPct) : -cfg.stake;
+            // "Rescued": this trade LOST at the chosen duration but WINS at
+            // this horizon -- i.e. holding to +h seconds would have saved it.
+            if (!t.won && won && h > cfg.durationSec) rescued++;
+        }
+        double wr = resolvedTrades ? (100.0 * wins / resolvedTrades) : 0.0;
+        char line[256];
+        std::snprintf(line, sizeof(line),
+                      "  %3ds  |  %5d  | %5d | %4.1f | %+9.2f | %s%d\n",
+                      h, resolvedTrades, wins, wr, net,
+                      (h == cfg.durationSec ? "(chosen)  " : "          "), rescued);
+        std::cout << line;
+    }
+
+    // Recommend the horizon with the best net P&L.
+    int bestH = cfg.durationSec;
+    double bestNet = -1e18;
+    for (int h : horizons) {
+        double net = 0.0;
+        for (const auto& t : trades) {
+            bool resolved = false;
+            bool won = outcomeAt(t, h, resolved);
+            if (!resolved) continue;
+            net += won ? (cfg.stake * cfg.payoutPct) : -cfg.stake;
+        }
+        if (net > bestNet) { bestNet = net; bestH = h; }
+    }
+    std::cout << "Best duration by net P&L on this data: " << bestH << "s ("
+              << (bestH == cfg.durationSec ? "matches your choice"
+                                           : "consider switching to this")
+              << ").\n";
+    std::cout << "Reading: a high 'rescued losers' count at a longer horizon means\n"
+              << "your entries are right but the contract expires too soon.\n"
+              << "------------------------------------------------------------\n";
 }
 
 void printBacktestSummary(const BacktestConfig& cfg, const BacktestResult& r) {
@@ -740,6 +841,211 @@ void runPaperTrading(DerivWsClient& client, const PaperTradeConfig& cfg,
 }
 
 // ============================================================================
+// Section 6b: LIVE trading on Deriv via multiplier contracts (real demo orders)
+//
+// Runs natively on a Linux VPS (no MT5, no Wine). Authorizes with an API token,
+// streams ticks, runs the chosen strategy, and on a signal buys a MULTUP/
+// MULTDOWN multiplier contract on the symbol with a fixed stop-loss/take-profit
+// (calculated risk) plus a bot-side trailing stop that locks profit once the
+// trade is in the money. One position at a time, with cooldown / max-trades /
+// max-consecutive-loss / daily-loss guards -- the same discipline as the EA.
+// ============================================================================
+
+struct LiveTradeConfig {
+    std::string symbol;
+    std::string strategyName = "rsi";
+    std::string token;
+    double stake        = 1.0;     // stake per contract (account currency)
+    int    multiplier   = 100;     // multiplier (e.g. gold: 50-150)
+    double slAmount     = 0.0;     // stop-loss as money amount (0 = none)
+    double tpAmount     = 0.0;     // take-profit as money amount (0 = none)
+    double beAmount     = 0.0;     // profit at which trailing arms (0 = off)
+    double trailAmount  = 0.0;     // giveback from peak profit that closes it
+    int    cooldownSec  = 0;
+    int    maxTrades    = 0;        // 0 = unlimited (per session)
+    int    maxConsecLosses = 0;     // 0 = off
+    double maxDailyLoss = 0.0;      // 0 = off (session loss cap)
+    std::string csvOut  = "live_trades.csv";
+};
+
+// Read messages until one of the given msg_type arrives (or an error). Other
+// messages seen in the meantime are dropped (used only briefly, while flat).
+static bool recvUntilType(DerivWsClient& client, const std::string& type, json& out) {
+    for (int i = 0; i < 50; i++) {
+        std::string raw;
+        if (!client.receiveText(raw)) return false;
+        json msg;
+        try { msg = json::parse(raw); } catch (...) { continue; }
+        if (msg.contains("error")) {
+            std::cerr << "Deriv API error: " << msg["error"].value("message", "unknown") << "\n";
+            out = msg;
+            return false;
+        }
+        if (msg.value("msg_type", "") == type) { out = msg; return true; }
+    }
+    return false;
+}
+
+void runLiveTrading(DerivWsClient& client, const LiveTradeConfig& cfg,
+                    std::function<Signal(int64_t, double)> strategyFn,
+                    std::function<double()> rsiReaderFn) {
+    std::signal(SIGINT, detail::handleSigint);
+
+    // 1. Authorize ----------------------------------------------------------
+    if (!client.sendText(json({{"authorize", cfg.token}}).dump())) {
+        std::cerr << "Failed to send authorize.\n"; return;
+    }
+    json auth;
+    if (!recvUntilType(client, "authorize", auth)) {
+        std::cerr << "Authorization failed. Check your --token.\n"; return;
+    }
+    std::string currency = auth["authorize"].value("currency", "USD");
+    std::string loginid  = auth["authorize"].value("loginid", "?");
+    double balance       = auth["authorize"].value("balance", 0.0);
+    bool isVirtual       = auth["authorize"].value("is_virtual", 0) == 1;
+    std::cout << "Authorized as " << loginid << " (" << currency << ") balance="
+              << balance << (isVirtual ? "  [VIRTUAL/DEMO]" : "  [REAL MONEY]") << "\n";
+    if (!isVirtual) {
+        std::cout << "WARNING: this is a REAL-money account. Ctrl+C now if that was not intended.\n";
+    }
+
+    // 2. Subscribe to ticks -------------------------------------------------
+    if (!client.sendText(json({{"ticks", cfg.symbol}, {"subscribe", 1}}).dump())) {
+        std::cerr << "Failed to subscribe ticks.\n"; return;
+    }
+
+    std::ofstream csv(cfg.csvOut, std::ios::app);
+    if (csv.tellp() == 0) csv << "open_time,dir,stake,multiplier,close_profit,balance\n";
+
+    // Session state
+    bool   inPosition = false;
+    int64_t contractId = 0;
+    Direction posDir = Direction::Rise;
+    double peakProfit = 0.0;
+    int64_t lastEntryTime = INT64_MIN / 2;
+    int    tradesOpened = 0, wins = 0;
+    int    consecLosses = 0;
+    double sessionPnl = 0.0;
+
+    auto riskBlocksEntry = [&](int64_t now) -> bool {
+        if (inPosition) return true;
+        if (cfg.cooldownSec > 0 && (now - lastEntryTime) < cfg.cooldownSec) return true;
+        if (cfg.maxConsecLosses > 0 && consecLosses >= cfg.maxConsecLosses) return true;
+        if (cfg.maxTrades > 0 && tradesOpened >= cfg.maxTrades) return true;
+        if (cfg.maxDailyLoss > 0.0 && sessionPnl <= -cfg.maxDailyLoss) return true;
+        return false;
+    };
+
+    auto openContract = [&](bool up, int64_t now) {
+        json params = {
+            {"amount", cfg.stake},
+            {"basis", "stake"},
+            {"contract_type", up ? "MULTUP" : "MULTDOWN"},
+            {"currency", currency},
+            {"symbol", cfg.symbol},
+            {"multiplier", cfg.multiplier}
+        };
+        json limit = json::object();
+        if (cfg.slAmount > 0.0) limit["stop_loss"]   = cfg.slAmount;
+        if (cfg.tpAmount > 0.0) limit["take_profit"] = cfg.tpAmount;
+        if (!limit.empty()) params["limit_order"] = limit;
+
+        json buy = {{"buy", 1}, {"price", cfg.stake}, {"parameters", params}};
+        if (client.sendText(buy.dump())) {
+            posDir = up ? Direction::Rise : Direction::Fall;
+            lastEntryTime = now;
+            std::cout << "[BUY] " << (up ? "MULTUP" : "MULTDOWN") << " stake=" << cfg.stake
+                      << " x" << cfg.multiplier << " (RSI=" << rsiReaderFn() << ")\n";
+        }
+    };
+
+    std::cout << "Live trading on " << cfg.symbol << " with strategy '" << cfg.strategyName
+              << "'. Press Ctrl+C to stop.\n";
+
+    // 3. Event loop ---------------------------------------------------------
+    while (!detail::g_stopRequested.load()) {
+        std::string raw;
+        if (!client.receiveText(raw)) { std::cerr << "Connection lost.\n"; break; }
+        json msg;
+        try { msg = json::parse(raw); } catch (...) { continue; }
+
+        if (msg.contains("error")) {
+            std::cerr << "Deriv API error: " << msg["error"].value("message", "unknown") << "\n";
+            continue;
+        }
+        std::string type = msg.value("msg_type", "");
+
+        if (type == "tick") {
+            auto& tick = msg["tick"];
+            int64_t t = tick.value("epoch", (int64_t)0);
+            double  p = tick.value("quote", 0.0);
+            if (t == 0) continue;
+
+            Signal sig = strategyFn(t, p);
+            if (sig != Signal::None && !riskBlocksEntry(t)) {
+                openContract(sig == Signal::Rise, t);
+            }
+        }
+        else if (type == "buy") {
+            contractId = msg["buy"].value("contract_id", (int64_t)0);
+            if (contractId != 0) {
+                inPosition = true;
+                peakProfit = 0.0;
+                tradesOpened++;
+                std::cout << "[OPEN] contract " << contractId
+                          << " buy_price=" << msg["buy"].value("buy_price", 0.0) << "\n";
+                // Subscribe to this contract's live updates.
+                client.sendText(json({{"proposal_open_contract", 1},
+                                       {"contract_id", contractId}, {"subscribe", 1}}).dump());
+            }
+        }
+        else if (type == "proposal_open_contract") {
+            auto& poc = msg["proposal_open_contract"];
+            if (poc.is_null() || poc.value("contract_id", (int64_t)0) != contractId) continue;
+
+            double profit = poc.value("profit", 0.0);
+            bool   isSold = poc.value("is_sold", 0) == 1;
+
+            if (!isSold && inPosition) {
+                // Bot-side trailing stop: once profit reaches the break-even
+                // threshold, close if it gives back trailAmount from the peak.
+                peakProfit = std::max(peakProfit, profit);
+                if (cfg.beAmount > 0.0 && cfg.trailAmount > 0.0 &&
+                    peakProfit >= cfg.beAmount && profit <= peakProfit - cfg.trailAmount) {
+                    std::cout << "[TRAIL] locking profit, selling contract " << contractId
+                              << " (peak=" << peakProfit << " now=" << profit << ")\n";
+                    client.sendText(json({{"sell", contractId}, {"price", 0}}).dump());
+                }
+            }
+
+            if (isSold) {
+                bool won = profit > 0.0;
+                sessionPnl += profit;
+                if (won) { wins++; consecLosses = 0; } else { consecLosses++; }
+                balance += profit;
+                csv << poc.value("date_start", (int64_t)0) << ","
+                    << Trade::dirName(posDir) << "," << cfg.stake << ","
+                    << cfg.multiplier << "," << profit << "," << balance << "\n";
+                csv.flush();
+                std::cout << "[CLOSED] contract " << contractId << " profit=" << profit
+                          << " -> " << (won ? "WIN" : "LOSS")
+                          << " | session P&L=" << sessionPnl
+                          << " | streak losses=" << consecLosses << "\n";
+                inPosition = false;
+                contractId = 0;
+            }
+        }
+    }
+
+    std::cout << "\n===== Live Session Summary =====\n";
+    std::cout << "Trades: " << tradesOpened << "   Wins: " << wins
+              << "   Win rate: " << (tradesOpened > 0 ? (100.0 * wins / tradesOpened) : 0.0) << "%\n";
+    std::cout << "Session P&L: " << sessionPnl << "   Balance: " << balance << "\n";
+    std::cout << "Ledger: " << cfg.csvOut << "\n";
+    std::cout << "================================\n";
+}
+
+// ============================================================================
 // Section 7: CLI entry point
 // ============================================================================
 
@@ -764,6 +1070,18 @@ static std::string resolveSymbol(const std::string& alias) {
         {"v75",     "R_75"},
         {"v100",    "R_100"},
         {"volatility75", "R_75"},
+        // Boom & Crash indices
+        {"boom1000", "BOOM1000"},
+        {"boom500",  "BOOM500"},
+        {"boom300",  "BOOM300N"},
+        {"crash1000","CRASH1000"},
+        {"crash500", "CRASH500"},
+        {"crash300", "CRASH300N"},
+        // Bull & Bear market indices
+        {"bull",     "RDBULL"},
+        {"bullmarket","RDBULL"},
+        {"bear",     "RDBEAR"},
+        {"bearmarket","RDBEAR"},
         // Forex (Deriv prefixes forex pairs with "frx")
         {"eurusd",  "frxEURUSD"},
         {"gbpusd",  "frxGBPUSD"},
@@ -881,20 +1199,34 @@ static void printUsage() {
         "Usage:\n"
         "  derivbot --mode backtest --symbol jump10 --duration 15 [options]\n"
         "  derivbot --mode paper    --symbol jump100 --duration 30 [options]\n"
+        "  derivbot --mode live     --symbol gold --token <demo_token> --strategy random_forest [options]\n"
         "  derivbot --train --symbols jump10,jump25 --autoadjust\n\n"
+        "Live trading (real DEMO orders via Deriv multiplier contracts; Linux-VPS friendly):\n"
+        "  --token <api_token>     Deriv API token (use a DEMO/virtual token!). Required for --mode live\n"
+        "  --multiplier <n>        Multiplier for the contract (e.g. gold 50-150, default 100)\n"
+        "  --stake <amt>           Stake per contract (account currency)\n"
+        "  --sl-amount <money>     Stop-loss as a money amount (calculated risk)\n"
+        "  --tp-amount <money>     Take-profit as a money amount\n"
+        "  --be-amount <money>     Profit at which the trailing stop arms\n"
+        "  --trail-amount <money>  Giveback from peak profit that closes the trade (locks profit)\n"
+        "  --daily-loss <money>    Stop opening trades after this session loss\n"
+        "  --cooldown <sec>        Min seconds between entries\n"
+        "  --max-consec-losses <n> Pause after N losses in a row\n"
+        "  --max-trades <n>        Stop after N trades this session\n\n"
         "Symbols: jump10 jump25 jump50 jump75 jump100 step100 v75 eurusd gold etc\n"
         "  (or any raw Deriv symbol code, e.g. --symbol frxAUDCAD)\n"
         "  Run with --list-symbols to see every market Deriv currently offers,\n"
         "  pulled live -- the authoritative source, not a hardcoded guess.\n\n"
         "Strategy:\n"
-        "  --strategy <rsi|confluence|ema_cross|macd|bollinger|stochastic|multi_confluence>\n"
+        "  --strategy <rsi|confluence|ema_cross|macd|bollinger|stochastic|\n"
+        "              multi_confluence|random_forest|xgboost>\n"
         "                                  Entry strategy (default rsi)\n"
         "  --cooldown <sec>              Minimum seconds between fired signals (default 0).\n\n"
         "Common options:\n"
-        "  --duration <15|30>      Contract duration in seconds (default 15)\n"
+        "  --duration <10|15|30|60> Contract duration in seconds (default 15)\n"
         "  --rsi-period <n>        RSI lookback period (default 14)\n"
-        "  --oversold <n>          RSI oversold threshold -> Rise signal (default 30)\n"
-        "  --overbought <n>        RSI overbought threshold -> Fall signal (default 70)\n"
+        "  --oversold <n>          RSI oversold line; rebound back ABOVE it -> Rise (default 30)\n"
+        "  --overbought <n>        RSI overbought line; rebound back BELOW it -> Fall (default 70)\n"
         "  --stake <n>             Stake per trade (default 1.0)\n"
         "  --payout <pct>          Payout fraction on a win, e.g. 0.95 (default 0.95)\n"
         "  --count <n>             [backtest] number of historical ticks to pull (default 5000)\n"
@@ -966,6 +1298,12 @@ int main(int argc, char** argv) {
     double tpPips = 0, slPips = 0;
     double spreadPips = 0.0;
 
+    // Live-trading (Deriv multiplier) options
+    std::string apiToken;
+    int    multiplier = 100;
+    double slAmount = 0.0, tpAmount = 0.0, beAmount = 0.0, trailAmount = 0.0;
+    double dailyLoss = 0.0;
+
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string(); };
@@ -1016,6 +1354,13 @@ int main(int argc, char** argv) {
         else if (arg == "--tp") { tpPips = std::stod(next()); }
         else if (arg == "--sl") { slPips = std::stod(next()); }
         else if (arg == "--spread") { spreadPips = std::stod(next()); }
+        else if (arg == "--token") { apiToken = next(); }
+        else if (arg == "--multiplier") { multiplier = std::stoi(next()); }
+        else if (arg == "--sl-amount") { slAmount = std::stod(next()); }
+        else if (arg == "--tp-amount") { tpAmount = std::stod(next()); }
+        else if (arg == "--be-amount") { beAmount = std::stod(next()); }
+        else if (arg == "--trail-amount") { trailAmount = std::stod(next()); }
+        else if (arg == "--daily-loss") { dailyLoss = std::stod(next()); }
         else if (arg == "--list-symbols") { mode = "list-symbols"; }
         else if (arg == "--help") { printUsage(); return 0; }
         else { std::cerr << "Unknown argument: " << arg << "\n"; printUsage(); return 1; }
@@ -1035,20 +1380,32 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (mode == "backtest" || mode == "paper") {
-        if (duration != 15 && duration != 30 && duration != 60) {
-            std::cerr << "This tool is scoped to 15s/30s/60s durations only. Got: " << duration << "\n";
+    if (mode == "backtest" || mode == "paper" || mode == "live") {
+        if ((mode == "backtest" || mode == "paper") &&
+            duration != 10 && duration != 15 && duration != 30 && duration != 60) {
+            std::cerr << "This tool is scoped to 10s/15s/30s/60s durations only. Got: " << duration << "\n";
             return 1;
         }
         if (loadRunId.empty()) {
             if (strategyName != "rsi" && strategyName != "confluence" &&
                 strategyName != "ema_cross" && strategyName != "macd" &&
                 strategyName != "bollinger" && strategyName != "stochastic" &&
-                strategyName != "multi_confluence") {
+                strategyName != "multi_confluence" &&
+                strategyName != "random_forest" && strategyName != "xgboost") {
                 std::cerr << "Unknown --strategy: " << strategyName << "\n";
                 return 1;
             }
         }
+    }
+    // Allow the token to come from the environment (DERIV_TOKEN) so it never
+    // has to appear on the command line / process list (used by the dashboard).
+    if (apiToken.empty()) {
+        const char* envTok = std::getenv("DERIV_TOKEN");
+        if (envTok && *envTok) apiToken = envTok;
+    }
+    if (mode == "live" && apiToken.empty()) {
+        std::cerr << "--mode live requires --token <deriv_api_token> or the DERIV_TOKEN env var (use a DEMO token).\n";
+        return 1;
     }
 
     std::string path = "/websockets/v3?app_id=" + appId + "&l=EN";
@@ -1227,6 +1584,12 @@ int main(int argc, char** argv) {
         else if (strategyName == "bollinger") genericStrat = std::make_unique<BollingerStrategy>();
         else if (strategyName == "stochastic") genericStrat = std::make_unique<StochasticStrategy>();
         else if (strategyName == "multi_confluence") genericStrat = std::make_unique<MultiConfluenceStrategy>(MultiConfluenceStrategy::Config{});
+        // ML strategies self-train on the first ~300 candles, then predict. With
+        // no dedicated CLI flags, use solid defaults; tune them via --train.
+        else if (strategyName == "random_forest")
+            genericStrat = std::make_unique<RandomForestStrategy>(/*candlePeriod*/15, /*numTrees*/30, /*maxDepth*/4, /*minSamples*/10, /*voteThreshold*/0.67, duration);
+        else if (strategyName == "xgboost")
+            genericStrat = std::make_unique<XGBoostStrategy>(/*candlePeriod*/15, /*nRounds*/40, /*maxDepth*/3, /*learningRate*/0.1, /*probMargin*/0.10, duration);
 
         StrategyBase* ptr = genericStrat.get();
         strategyFn = [&cooldown, ptr](int64_t t, double p) {
@@ -1262,8 +1625,13 @@ int main(int argc, char** argv) {
         }
         std::cout << "Fetched " << prices.size() << " ticks. Running backtest...\n";
 
-        BacktestResult result = runBacktest(cfg, times, prices, strategyFn);
+        std::vector<Trade> trades;
+        BacktestResult result = runBacktest(cfg, times, prices, strategyFn, &trades);
         printBacktestSummary(cfg, result);
+
+        // Only meaningful for duration-based (synthetic) exits, not TP/SL.
+        bool usedTPSL = isForexOrCommodity(cfg.symbol) && cfg.tpPips > 0 && cfg.slPips > 0;
+        if (!usedTPSL) analyzeHorizons(times, prices, trades, cfg);
 
         if (confStrat) {
             auto& d = confStrat->diagnostics();
@@ -1308,8 +1676,27 @@ int main(int argc, char** argv) {
 
         runPaperTrading(client, cfg, strategyFn, rsiReaderFn);
 
+    } else if (mode == "live") {
+        LiveTradeConfig cfg;
+        cfg.symbol = symbol;
+        cfg.strategyName = strategyName;
+        cfg.token = apiToken;
+        cfg.stake = stake;
+        cfg.multiplier = multiplier;
+        cfg.slAmount = slAmount;
+        cfg.tpAmount = tpAmount;
+        cfg.beAmount = beAmount;
+        cfg.trailAmount = trailAmount;
+        cfg.cooldownSec = cooldownSec;
+        cfg.maxTrades = maxTrades;
+        cfg.maxConsecLosses = maxConsecLosses;
+        cfg.maxDailyLoss = dailyLoss;
+        if (!csvOut.empty()) cfg.csvOut = csvOut;
+
+        runLiveTrading(client, cfg, strategyFn, rsiReaderFn);
+
     } else {
-        std::cerr << "Unknown --mode: " << mode << " (expected 'backtest' or 'paper')\n";
+        std::cerr << "Unknown --mode: " << mode << " (expected 'backtest', 'paper' or 'live')\n";
         return 1;
     }
 

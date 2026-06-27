@@ -191,7 +191,8 @@ private:
                                 paramName == "signal" || paramName == "k_period" || paramName == "d_period" ||
                                 paramName == "bb_period" || paramName == "rsi_period" ||
                                 paramName == "min_agree" || paramName == "mask" ||
-                                paramName == "max_depth" || paramName == "min_samples") {
+                                paramName == "max_depth" || paramName == "min_samples" ||
+                                paramName == "num_trees" || paramName == "n_rounds") {
                                 newVal = std::round(newVal);
                                 if (newVal == baseVal || newVal < 1) continue;
                             }

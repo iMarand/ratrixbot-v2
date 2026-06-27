@@ -1,0 +1,12 @@
+InpMode=0
+InpTimeframe=1
+InpFractalN=3
+InpUseTrendFilter=true
+InpBreakBufferPoints=30
+InpStopLossPoints=200
+InpTakeProfitPoints=300
+InpUseTrailing=true
+InpBreakEvenPoints=120
+InpTrailPoints=120
+InpUseRiskPercent=true
+InpRiskPercent=1.0

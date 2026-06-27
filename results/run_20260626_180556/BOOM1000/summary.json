@@ -1,0 +1,191 @@
+{
+  "rl_result": {
+    "netPnl": 0.0,
+    "statesVisited": 0,
+    "totalTrades": 0,
+    "wins": 0
+  },
+  "strategies": [
+    {
+      "maxDrawdown": -1.0,
+      "maxLossStreak": 1,
+      "netPnl": 604.8500000000001,
+      "params": {
+        "candle_period": 15.0,
+        "learning_rate": 0.1,
+        "max_depth": 3.0,
+        "n_rounds": 40.0,
+        "prob_margin": 0.07,
+        "trade_duration": 15.0
+      },
+      "rank": 1,
+      "score": 1089.5603025633845,
+      "strategyName": "xgboost",
+      "totalTrades": 649,
+      "winRatePct": 99.07550077041603
+    },
+    {
+      "maxDrawdown": -1.0,
+      "maxLossStreak": 1,
+      "netPnl": 604.8500000000001,
+      "params": {
+        "candle_period": 15.0,
+        "max_depth": 3.0,
+        "min_samples": 10.0,
+        "num_trees": 30.0,
+        "trade_duration": 15.0,
+        "vote_threshold": 0.67
+      },
+      "rank": 2,
+      "score": 1089.5603025633845,
+      "strategyName": "random_forest",
+      "totalTrades": 649,
+      "winRatePct": 99.07550077041603
+    },
+    {
+      "maxDrawdown": -1.0,
+      "maxLossStreak": 1,
+      "netPnl": 604.8500000000001,
+      "params": {
+        "candle_period": 15.0,
+        "max_depth": 3.0,
+        "min_samples": 10.0,
+        "num_trees": 30.0,
+        "trade_duration": 15.0,
+        "vote_threshold": 0.75
+      },
+      "rank": 3,
+      "score": 1089.5603025633845,
+      "strategyName": "random_forest",
+      "totalTrades": 649,
+      "winRatePct": 99.07550077041603
+    },
+    {
+      "maxDrawdown": -1.0,
+      "maxLossStreak": 1,
+      "netPnl": 604.8500000000001,
+      "params": {
+        "candle_period": 15.0,
+        "learning_rate": 0.1,
+        "max_depth": 3.0,
+        "n_rounds": 40.0,
+        "prob_margin": 0.12,
+        "trade_duration": 15.0
+      },
+      "rank": 4,
+      "score": 1089.5603025633845,
+      "strategyName": "xgboost",
+      "totalTrades": 649,
+      "winRatePct": 99.07550077041603
+    },
+    {
+      "maxDrawdown": -1.0,
+      "maxLossStreak": 1,
+      "netPnl": 604.8500000000001,
+      "params": {
+        "candle_period": 15.0,
+        "max_depth": 4.0,
+        "min_samples": 10.0,
+        "num_trees": 30.0,
+        "trade_duration": 15.0,
+        "vote_threshold": 0.6
+      },
+      "rank": 5,
+      "score": 1089.5603025633845,
+      "strategyName": "random_forest",
+      "totalTrades": 649,
+      "winRatePct": 99.07550077041603
+    },
+    {
+      "maxDrawdown": -1.0,
+      "maxLossStreak": 1,
+      "netPnl": 604.8500000000001,
+      "params": {
+        "candle_period": 15.0,
+        "max_depth": 4.0,
+        "min_samples": 10.0,
+        "num_trees": 30.0,
+        "trade_duration": 15.0,
+        "vote_threshold": 0.67
+      },
+      "rank": 6,
+      "score": 1089.5603025633845,
+      "strategyName": "random_forest",
+      "totalTrades": 649,
+      "winRatePct": 99.07550077041603
+    },
+    {
+      "maxDrawdown": -1.0,
+      "maxLossStreak": 1,
+      "netPnl": 604.8500000000001,
+      "params": {
+        "candle_period": 15.0,
+        "max_depth": 3.0,
+        "min_samples": 10.0,
+        "num_trees": 30.0,
+        "trade_duration": 15.0,
+        "vote_threshold": 0.6
+      },
+      "rank": 7,
+      "score": 1089.5603025633845,
+      "strategyName": "random_forest",
+      "totalTrades": 649,
+      "winRatePct": 99.07550077041603
+    },
+    {
+      "maxDrawdown": -1.0,
+      "maxLossStreak": 1,
+      "netPnl": 604.8500000000001,
+      "params": {
+        "candle_period": 15.0,
+        "max_depth": 4.0,
+        "min_samples": 10.0,
+        "num_trees": 30.0,
+        "trade_duration": 15.0,
+        "vote_threshold": 0.75
+      },
+      "rank": 8,
+      "score": 1089.5603025633845,
+      "strategyName": "random_forest",
+      "totalTrades": 649,
+      "winRatePct": 99.07550077041603
+    },
+    {
+      "maxDrawdown": -1.0,
+      "maxLossStreak": 1,
+      "netPnl": 604.8500000000001,
+      "params": {
+        "candle_period": 15.0,
+        "learning_rate": 0.3,
+        "max_depth": 3.0,
+        "n_rounds": 40.0,
+        "prob_margin": 0.07,
+        "trade_duration": 15.0
+      },
+      "rank": 9,
+      "score": 1089.5603025633845,
+      "strategyName": "xgboost",
+      "totalTrades": 649,
+      "winRatePct": 99.07550077041603
+    },
+    {
+      "maxDrawdown": -1.0,
+      "maxLossStreak": 1,
+      "netPnl": 604.8500000000001,
+      "params": {
+        "candle_period": 15.0,
+        "learning_rate": 0.3,
+        "max_depth": 3.0,
+        "n_rounds": 40.0,
+        "prob_margin": 0.12,
+        "trade_duration": 15.0
+      },
+      "rank": 10,
+      "score": 1089.5603025633845,
+      "strategyName": "xgboost",
+      "totalTrades": 649,
+      "winRatePct": 99.07550077041603
+    }
+  ],
+  "symbol": "BOOM1000"
+}

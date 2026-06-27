@@ -1,0 +1,92 @@
+========================================
+ Training Summary for R_25
+========================================
+
+[Top 10 Grid Search Strategies]
+
+Rank 1: random_forest (candle_period=15.000000, max_depth=3.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.750000)
+  Score:      0.405444
+  P&L:        12.5
+  Win Rate:   53.0726%
+  Trades:     358
+  Max DD:     -11.9
+  Max Streak: 9 losses in a row
+
+Rank 2: random_forest (candle_period=30.000000, max_depth=4.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=30.000000, vote_threshold=0.750000)
+  Score:      0.169479
+  P&L:        2.55
+  Win Rate:   52.2727%
+  Trades:     132
+  Max DD:     -11
+  Max Streak: 5 losses in a row
+
+Rank 3: random_forest (candle_period=15.000000, max_depth=4.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.670000)
+  Score:      0.147433
+  P&L:        10.05
+  Win Rate:   51.9207%
+  Trades:     807
+  Max DD:     -29.25
+  Max Streak: 8 losses in a row
+
+Rank 4: xgboost (candle_period=30.000000, learning_rate=0.100000, max_depth=3.000000, n_rounds=40.000000, prob_margin=0.070000, trade_duration=30.000000)
+  Score:      0.0770382
+  P&L:        4.1
+  Win Rate:   51.7391%
+  Trades:     460
+  Max DD:     -26.35
+  Max Streak: 7 losses in a row
+
+Rank 5: random_forest (candle_period=15.000000, max_depth=4.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=30.000000, vote_threshold=0.750000)
+  Score:      0.0458922
+  P&L:        2.1
+  Win Rate:   51.497%
+  Trades:     501
+  Max DD:     -22.55
+  Max Streak: 7 losses in a row
+
+Rank 6: random_forest (candle_period=30.000000, max_depth=3.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=30.000000, vote_threshold=0.750000)
+  Score:      -0.95
+  P&L:        -0.95
+  Win Rate:   50.6494%
+  Trades:     77
+  Max DD:     -13.2
+  Max Streak: 5 losses in a row
+
+Rank 7: xgboost (candle_period=30.000000, learning_rate=0.100000, max_depth=3.000000, n_rounds=40.000000, prob_margin=0.070000, trade_duration=15.000000)
+  Score:      -1.75
+  P&L:        -1.75
+  Win Rate:   51.087%
+  Trades:     460
+  Max DD:     -30.3
+  Max Streak: 8 losses in a row
+
+Rank 8: random_forest (candle_period=30.000000, max_depth=4.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.750000)
+  Score:      -3.3
+  P&L:        -3.3
+  Win Rate:   50%
+  Trades:     132
+  Max DD:     -10.8
+  Max Streak: 6 losses in a row
+
+Rank 9: random_forest (candle_period=15.000000, max_depth=3.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.600000)
+  Score:      -4.75
+  P&L:        -4.75
+  Win Rate:   51.073%
+  Trades:     1165
+  Max DD:     -43.85
+  Max Streak: 9 losses in a row
+
+Rank 10: random_forest (candle_period=15.000000, max_depth=4.000000, min_samples=10.000000, num_trees=30.000000, trade_duration=15.000000, vote_threshold=0.750000)
+  Score:      -6.35
+  P&L:        -6.35
+  Win Rate:   50.6641%
+  Trades:     527
+  Max DD:     -28.15
+  Max Streak: 8 losses in a row
+
+[RL Agent Training]
+
+  Total updates:  0
+  States visited: 0 (out of 54)
+  Final Epsilon:  0
+  Total P&L:      0 (0/0)

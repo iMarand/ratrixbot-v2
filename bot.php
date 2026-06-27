@@ -9,6 +9,9 @@ $results_dir = __DIR__ . '/results';
 $is_linux = (PHP_OS_FAMILY === 'Linux');
 $tmux_session = 'ratrix_train';
 $log_file = __DIR__ . '/train.log';
+$live_session = 'ratrix_live';
+$live_log = __DIR__ . '/live.log';
+$live_csv = __DIR__ . '/live_trades.csv';
 
 // ============================================================================
 // 1. Database Initialization
@@ -217,6 +220,99 @@ if (isset($_GET['action'])) {
         exit;
     }
     
+    // ====================== LIVE TRADING ENDPOINTS ======================
+    if ($action === 'live_status') {
+        $status = 'stopped';
+        if ($is_linux) {
+            $check = shell_exec("tmux has-session -t $live_session 2>&1");
+            if (strpos($check, 'no server') === false && strpos($check, "can't find session") === false) {
+                $status = 'running';
+            }
+        }
+        echo json_encode(["status" => $status]);
+        exit;
+    }
+
+    if ($action === 'start_live') {
+        if (!$is_linux) {
+            echo json_encode(["error" => "Live trading via the dashboard runs on Linux/tmux (your VPS)."]);
+            exit;
+        }
+        $token = trim($_POST['token'] ?? '');
+        if ($token === '') { echo json_encode(["error" => "API token is required."]); exit; }
+
+        // Build the command WITHOUT the token (passed via env so it never shows
+        // in the process list / JSON response).
+        $symbol   = escapeshellarg($_POST['symbol'] ?? 'gold');
+        $strategy = escapeshellarg($_POST['strategy'] ?? 'rsi');
+        $cmd  = "./derivbot --mode live --symbol $symbol --strategy $strategy";
+        $cmd .= " --stake "      . (float)($_POST['stake'] ?? 1);
+        $cmd .= " --multiplier " . (int)($_POST['multiplier'] ?? 100);
+        if (isset($_POST['sl_amount']))    $cmd .= " --sl-amount "    . (float)$_POST['sl_amount'];
+        if (isset($_POST['tp_amount']))    $cmd .= " --tp-amount "    . (float)$_POST['tp_amount'];
+        if (isset($_POST['be_amount']))    $cmd .= " --be-amount "    . (float)$_POST['be_amount'];
+        if (isset($_POST['trail_amount'])) $cmd .= " --trail-amount " . (float)$_POST['trail_amount'];
+        if (isset($_POST['cooldown']))     $cmd .= " --cooldown "     . (int)$_POST['cooldown'];
+        if (isset($_POST['max_consec']))   $cmd .= " --max-consec-losses " . (int)$_POST['max_consec'];
+        if (isset($_POST['daily_loss']))   $cmd .= " --daily-loss "   . (float)$_POST['daily_loss'];
+        $cmd .= " --csv " . escapeshellarg($live_csv);
+
+        if (file_exists($live_log)) unlink($live_log);
+
+        // Pass token through the environment of the tmux session.
+        $envToken = escapeshellarg($token);
+        shell_exec("tmux new-session -d -s $live_session "
+                 . "\"DERIV_TOKEN=$envToken $cmd > $live_log 2>&1\"");
+
+        echo json_encode(["success" => true, "cmd" => $cmd]); // note: token NOT included
+        exit;
+    }
+
+    if ($action === 'stop_live') {
+        if ($is_linux) shell_exec("tmux kill-session -t $live_session 2>&1");
+        echo json_encode(["success" => true]);
+        exit;
+    }
+
+    if ($action === 'get_live_logs') {
+        if (!file_exists($live_log)) { echo json_encode(["logs" => "No live session logs yet."]); exit; }
+        $logs = shell_exec("tail -n 80 " . escapeshellarg($live_log));
+        echo json_encode(["logs" => $logs]);
+        exit;
+    }
+
+    if ($action === 'live_trades') {
+        // Parse the live trade ledger for a monitoring table + running P&L.
+        $rows = [];
+        $pnl = 0.0; $wins = 0; $total = 0;
+        if (file_exists($live_csv) && ($fh = fopen($live_csv, 'r'))) {
+            $header = fgetcsv($fh); // open_time,dir,stake,multiplier,close_profit,balance
+            while (($r = fgetcsv($fh)) !== false) {
+                if (count($r) < 6) continue;
+                $profit = (float)$r[4];
+                $pnl += $profit; $total++; if ($profit > 0) $wins++;
+                $rows[] = [
+                    "time"       => (int)$r[0],
+                    "dir"        => $r[1],
+                    "stake"      => (float)$r[2],
+                    "multiplier" => (int)$r[3],
+                    "profit"     => $profit,
+                    "balance"    => (float)$r[5],
+                ];
+            }
+            fclose($fh);
+        }
+        $rows = array_slice(array_reverse($rows), 0, 50); // newest first, cap 50
+        echo json_encode([
+            "trades"   => $rows,
+            "sessionPnl" => $pnl,
+            "wins"     => $wins,
+            "total"    => $total,
+            "winRate"  => $total > 0 ? round(100.0 * $wins / $total, 1) : 0,
+        ]);
+        exit;
+    }
+
     echo json_encode(["error" => "Unknown action"]);
     exit;
 }
@@ -389,6 +485,7 @@ if (isset($_GET['action'])) {
             <div class="nav-title">Menu</div>
             <a class="nav-item active" onclick="switchView('dashboard')">Dashboard</a>
             <a class="nav-item" onclick="switchView('train')">Train AI</a>
+            <a class="nav-item" onclick="switchView('live')">Live Trading</a>
             <a class="nav-item" onclick="switchView('results')">Results & Charts</a>
             <a class="nav-item" href="doc.html" target="_blank">Documentation</a>
         </div>
@@ -451,6 +548,8 @@ if (isset($_GET['action'])) {
                                     <option value="crash1000">Crash 1000</option>
                                     <option value="boom500">Boom 500</option>
                                     <option value="crash500">Crash 500</option>
+                                    <option value="bull">Bull Market (RDBULL)</option>
+                                    <option value="bear">Bear Market (RDBEAR)</option>
                                 </optgroup>
                                 <optgroup label="Forex / Gold">
                                     <option value="eurusd">EUR/USD</option>
@@ -508,7 +607,8 @@ if (isset($_GET['action'])) {
                                 <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="stochastic"> Stochastic</label>
                                 <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="multi_confluence"> Confluence</label>
                                 <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="price_action"> Price Action</label>
-                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="candle_tree"> Candle Decision Tree</label>
+                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="random_forest"> Random Forest (ML)</label>
+                                <label style="font-weight: normal;"><input type="checkbox" class="strat-cb" value="xgboost"> XGBoost (ML)</label>
                             </div>
                         </div>
                         
@@ -516,6 +616,7 @@ if (isset($_GET['action'])) {
                             <div class="form-group flex-1">
                                 <label>Trade Durations (Synthetics)</label>
                                 <div style="display: flex; gap: 12px;">
+                                    <label style="font-weight: normal;"><input type="checkbox" class="dur-cb" value="10"> 10s</label>
                                     <label style="font-weight: normal;"><input type="checkbox" class="dur-cb" value="15" checked> 15s</label>
                                     <label style="font-weight: normal;"><input type="checkbox" class="dur-cb" value="30"> 30s</label>
                                     <label style="font-weight: normal;"><input type="checkbox" class="dur-cb" value="60"> 1m</label>
@@ -559,6 +660,84 @@ if (isset($_GET['action'])) {
             </div>
         </div>
         
+        <!-- LIVE TRADING VIEW -->
+        <div id="view-live" class="view-section">
+            <h1>Live Trading</h1>
+            <p>Trade gold / forex on your Deriv <strong>demo</strong> account via the API (runs on this VPS, no MT5). Login, trade and monitor here.</p>
+
+            <div class="flex-row" style="margin-top: 24px;">
+                <div class="card flex-1">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <div><strong>Status:</strong> <span id="live-status-badge" class="status-badge status-stopped">Checking...</span></div>
+                        <div>
+                            <span id="live-pnl" style="margin-right:16px; font-weight:600;"></span>
+                            <button class="btn-danger" onclick="stopLive()">Stop Bot</button>
+                        </div>
+                    </div>
+
+                    <form id="live-form" onsubmit="startLive(event)">
+                        <div class="form-group">
+                            <label>Deriv API Token (DEMO account — Read + Trade scope)</label>
+                            <input type="password" id="live-token" placeholder="Paste your demo API token" autocomplete="off">
+                            <small style="color:var(--text-muted)">Never stored or shown back; passed to the bot via env.</small>
+                        </div>
+                        <div class="flex-row">
+                            <div class="form-group flex-1">
+                                <label>Symbol</label>
+                                <select id="live-symbol">
+                                    <option value="gold" selected>Gold (XAU/USD)</option>
+                                    <option value="eurusd">EUR/USD</option>
+                                    <option value="gbpusd">GBP/USD</option>
+                                    <option value="usdjpy">USD/JPY</option>
+                                    <option value="v75">Volatility 75</option>
+                                    <option value="v100">Volatility 100</option>
+                                </select>
+                            </div>
+                            <div class="form-group flex-1">
+                                <label>Strategy</label>
+                                <select id="live-strategy">
+                                    <option value="rsi" selected>RSI rebound (trades immediately)</option>
+                                    <option value="random_forest">Random Forest (ML — needs warm-up)</option>
+                                    <option value="xgboost">XGBoost (ML — needs warm-up)</option>
+                                    <option value="multi_confluence">Multi-Confluence</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex-row">
+                            <div class="form-group flex-1"><label>Stake ($)</label><input type="number" id="live-stake" value="1" step="0.1"></div>
+                            <div class="form-group flex-1"><label>Multiplier</label><input type="number" id="live-mult" value="100"></div>
+                            <div class="form-group flex-1"><label>Stop Loss ($)</label><input type="number" id="live-sl" value="5" step="0.1"></div>
+                            <div class="form-group flex-1"><label>Take Profit ($)</label><input type="number" id="live-tp" value="10" step="0.1"></div>
+                        </div>
+                        <div class="flex-row">
+                            <div class="form-group flex-1"><label>Trail arms at ($)</label><input type="number" id="live-be" value="5" step="0.1"></div>
+                            <div class="form-group flex-1"><label>Trail giveback ($)</label><input type="number" id="live-trail" value="3" step="0.1"></div>
+                            <div class="form-group flex-1"><label>Cooldown (s)</label><input type="number" id="live-cooldown" value="60"></div>
+                            <div class="form-group flex-1"><label>Max consec losses</label><input type="number" id="live-maxconsec" value="3"></div>
+                            <div class="form-group flex-1"><label>Daily loss cap ($)</label><input type="number" id="live-daily" value="50"></div>
+                        </div>
+                        <button type="submit" style="width:100%;">Connect & Start Trading</button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="flex-row">
+                <div class="card flex-1">
+                    <h3>Live Log</h3>
+                    <div class="terminal" id="live-logs" style="height:300px;">No live session.</div>
+                </div>
+                <div class="card flex-1">
+                    <h3>Trades <span id="live-winrate" style="font-weight:400; color:var(--text-muted);"></span></h3>
+                    <div style="max-height:300px; overflow-y:auto;">
+                        <table>
+                            <thead><tr><th>Time</th><th>Dir</th><th>Stake</th><th>Profit</th><th>Balance</th></tr></thead>
+                            <tbody id="live-trades-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- RESULTS VIEW -->
         <div id="view-results" class="view-section">
             <h1>Results & Charts</h1>
@@ -599,6 +778,8 @@ if (isset($_GET['action'])) {
                                 <option value="crash1000">Crash 1000</option>
                                 <option value="boom500">Boom 500</option>
                                 <option value="crash500">Crash 500</option>
+                                <option value="bull">Bull Market (RDBULL)</option>
+                                <option value="bear">Bear Market (RDBEAR)</option>
                             </optgroup>
                             <optgroup label="Forex / Gold">
                                 <option value="eurusd">EUR/USD</option>
@@ -682,6 +863,7 @@ if (isset($_GET['action'])) {
         let logInterval = null;
         let dashboardRefreshInterval = null;
         let resultsRefreshInterval = null;
+        let liveRefreshInterval = null;
         let chartInstance = null;
 
         let dashboardChartInstance = null;
@@ -699,7 +881,13 @@ if (isset($_GET['action'])) {
             if (logInterval) { clearInterval(logInterval); logInterval = null; }
             if (dashboardRefreshInterval) { clearInterval(dashboardRefreshInterval); dashboardRefreshInterval = null; }
             if (resultsRefreshInterval) { clearInterval(resultsRefreshInterval); resultsRefreshInterval = null; }
-            
+            if (liveRefreshInterval) { clearInterval(liveRefreshInterval); liveRefreshInterval = null; }
+
+            if (viewId === 'live') {
+                refreshLive();
+                liveRefreshInterval = setInterval(refreshLive, 3000);
+            }
+
             if (viewId === 'dashboard') {
                 checkStatus();
                 logInterval = setInterval(fetchLogs, 2000);
@@ -1039,6 +1227,77 @@ if (isset($_GET['action'])) {
                     alert('Error deleting run: ' + data.error);
                 }
             } catch(e) { alert('Failed to delete run.'); }
+        }
+
+        // ---------------- Live Trading ----------------
+        async function startLive(e) {
+            e.preventDefault();
+            const token = document.getElementById('live-token').value.trim();
+            if (!token) { alert('Paste your Deriv DEMO API token first.'); return; }
+
+            const fd = new FormData();
+            fd.append('token', token);
+            fd.append('symbol',   document.getElementById('live-symbol').value);
+            fd.append('strategy', document.getElementById('live-strategy').value);
+            fd.append('stake',    document.getElementById('live-stake').value);
+            fd.append('multiplier', document.getElementById('live-mult').value);
+            fd.append('sl_amount',  document.getElementById('live-sl').value);
+            fd.append('tp_amount',  document.getElementById('live-tp').value);
+            fd.append('be_amount',  document.getElementById('live-be').value);
+            fd.append('trail_amount', document.getElementById('live-trail').value);
+            fd.append('cooldown',   document.getElementById('live-cooldown').value);
+            fd.append('max_consec', document.getElementById('live-maxconsec').value);
+            fd.append('daily_loss', document.getElementById('live-daily').value);
+
+            try {
+                const res = await fetch('?action=start_live', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('live-token').value = ''; // clear from the form
+                    alert('Live bot started on the VPS.');
+                    refreshLive();
+                } else {
+                    alert('Error: ' + (data.error || 'unknown'));
+                }
+            } catch(err) { alert('Failed to start live bot.'); }
+        }
+
+        async function stopLive() {
+            if (!confirm('Stop the live trading bot?')) return;
+            await fetch('?action=stop_live');
+            refreshLive();
+        }
+
+        async function refreshLive() {
+            // status
+            try {
+                const s = await (await fetch('?action=live_status')).json();
+                const badge = document.getElementById('live-status-badge');
+                if (s.status === 'running') { badge.textContent = 'RUNNING'; badge.className = 'status-badge status-running'; }
+                else { badge.textContent = 'STOPPED'; badge.className = 'status-badge status-stopped'; }
+            } catch(e) {}
+            // logs
+            try {
+                const l = await (await fetch('?action=get_live_logs')).json();
+                const term = document.getElementById('live-logs');
+                term.textContent = l.logs; term.scrollTop = term.scrollHeight;
+            } catch(e) {}
+            // trades + P&L
+            try {
+                const t = await (await fetch('?action=live_trades')).json();
+                document.getElementById('live-pnl').innerHTML = 'Session P&L: ' + formatMoney(t.sessionPnl);
+                document.getElementById('live-winrate').textContent =
+                    t.total > 0 ? `(${t.wins}/${t.total} wins, ${t.winRate}%)` : '';
+                const tb = document.getElementById('live-trades-body');
+                tb.innerHTML = '';
+                (t.trades || []).forEach(r => {
+                    const d = new Date(r.time * 1000).toLocaleTimeString();
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td>${d}</td><td>${r.dir}</td><td>$${r.stake}</td>`
+                                 + `<td>${formatMoney(r.profit)}</td><td>$${r.balance.toFixed(2)}</td>`;
+                    tb.appendChild(tr);
+                });
+            } catch(e) {}
         }
 
         // Init
