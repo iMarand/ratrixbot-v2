@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OTC Market Simulator — Algo Trading Lab</title>
+
+    <!-- Lightweight Charts CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js">
+    </script>
+
+    <style>
+        /* ---------- Reset & Base ---------- */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0b0e14;
+            color: #c8d0dc;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .app {
+            max-width: 1400px;
+            width: 100%;
+            background: #12171f;
+            border-radius: 20px;
+            padding: 24px 28px 28px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+            border: 1px solid #1e2835;
+        }
+
+        /* ---------- Header ---------- */
+        .header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 18px 30px;
+            margin-bottom: 22px;
+        }
+        .header h1 {
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+            color: #f0f4fa;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header h1 small {
+            font-size: 13px;
+            font-weight: 400;
+            color: #6f7e93;
+            letter-spacing: 0;
+        }
+        .header-controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px 18px;
+            margin-left: auto;
+        }
+        .header-controls label {
+            font-size: 13px;
+            color: #8b9bb5;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .header-controls select,
+        .header-controls input[type="range"] {
+            background: #1a232e;
+            border: 1px solid #2a3645;
+            color: #e8edf4;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            outline: none;
+            font-weight: 500;
+        }
+        .header-controls select {
+            min-width: 110px;
+        }
+        .header-controls select:hover,
+        .header-controls select:focus {
+            border-color: #3b4b60;
+        }
+        .header-controls input[type="range"] {
+            width: 100px;
+            padding: 0;
+            accent-color: #4f8cff;
+            background: transparent;
+            border: none;
+        }
+        .header-controls input[type="range"]::-webkit-slider-runnable-track {
+            height: 4px;
+            background: #1f2b38;
+            border-radius: 4px;
+        }
+        .header-controls input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 14px;
+            width: 14px;
+            border-radius: 50%;
+            background: #4f8cff;
+            margin-top: -5px;
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(79, 140, 255, 0.4);
+        }
+        .btn-pause {
+            background: #1f2b38;
+            border: 1px solid #2a3645;
+            color: #c8d0dc;
+            padding: 6px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-pause:hover {
+            background: #2a3645;
+            border-color: #3b4b60;
+        }
+        .btn-pause.active {
+            background: #2a3a4a;
+            border-color: #4f8cff;
+            color: #4f8cff;
+        }
+
+        /* ---------- Price Strip ---------- */
+        .price-strip {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 12px 28px;
+            background: #0d121a;
+            padding: 12px 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid #1a232e;
+        }
+        .price-strip .current {
+            font-size: 30px;
+            font-weight: 700;
+            color: #f0f4fa;
+            letter-spacing: -0.5px;
+            font-variant-numeric: tabular-nums;
+        }
+        .price-strip .change {
+            font-size: 18px;
+            font-weight: 600;
+            padding: 2px 12px;
+            border-radius: 20px;
+            background: #0d1a0d;
+            color: #4caf84;
+        }
+        .price-strip .change.negative {
+            background: #1a0d0d;
+            color: #f47b7b;
+        }
+        .price-strip .stat {
+            font-size: 14px;
+            color: #7a8ba3;
+        }
+        .price-strip .stat strong {
+            color: #d0d9e8;
+            font-weight: 500;
+        }
+        .price-strip .stat span {
+            font-variant-numeric: tabular-nums;
+        }
+        .price-strip .badge {
+            font-size: 12px;
+            background: #1a232e;
+            padding: 2px 12px;
+            border-radius: 30px;
+            color: #8b9bb5;
+            margin-left: auto;
+            font-weight: 500;
+            border: 1px solid #232f3e;
+        }
+
+        /* ---------- Chart Grid ---------- */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+        .chart-box {
+            background: #0d121a;
+            border-radius: 14px;
+            border: 1px solid #1a232e;
+            padding: 12px;
+            position: relative;
+        }
+        .chart-box .chart-label {
+            position: absolute;
+            top: 18px;
+            left: 20px;
+            z-index: 5;
+            font-size: 12px;
+            font-weight: 600;
+            color: #5a6f89;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            background: rgba(13, 18, 26, 0.7);
+            padding: 2px 12px;
+            border-radius: 12px;
+            backdrop-filter: blur(4px);
+            border: 1px solid #1a232e;
+            pointer-events: none;
+        }
+        .chart-box .chart-label .algo-badge {
+            color: #4f8cff;
+            font-weight: 700;
+            margin-left: 6px;
+        }
+        .chart-container {
+            width: 100%;
+            height: 320px;
+            position: relative;
+        }
+        .chart-container.area-chart {
+            height: 200px;
+        }
+
+        /* ---------- Signal Panel ---------- */
+        .signal-panel {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 20px;
+            margin-top: 14px;
+            padding: 10px 16px;
+            background: #0b1017;
+            border-radius: 10px;
+            border: 1px solid #1a232e;
+            font-size: 13px;
+        }
+        .signal-panel .signal-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #7a8ba3;
+        }
+        .signal-panel .signal-item .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .signal-panel .signal-item .dot.buy {
+            background: #4caf84;
+        }
+        .signal-panel .signal-item .dot.sell {
+            background: #f47b7b;
+        }
+        .signal-panel .signal-item .dot.neutral {
+            background: #5a6f89;
+        }
+        .signal-panel .signal-item strong {
+            color: #d0d9e8;
+            font-weight: 500;
+        }
+
+        /* ---------- Responsive ---------- */
+        @media (max-width: 780px) {
+            .app {
+                padding: 16px;
+            }
+            .header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 12px;
+            }
+            .header-controls {
+                margin-left: 0;
+                justify-content: space-between;
+            }
+            .price-strip {
+                flex-wrap: wrap;
+                gap: 8px 16px;
+            }
+            .price-strip .current {
+                font-size: 24px;
+            }
+            .price-strip .badge {
+                margin-left: 0;
+            }
+            .chart-container {
+                height: 220px;
+            }
+            .chart-container.area-chart {
+                height: 150px;
+            }
+            .signal-panel {
+                font-size: 12px;
+                gap: 4px 14px;
+            }
+        }
+        @media (max-width: 480px) {
+            .header-controls {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .header-controls label {
+                font-size: 12px;
+            }
+            .price-strip .current {
+                font-size: 20px;
+            }
+            .chart-container {
+                height: 180px;
+            }
+            .chart-container.area-chart {
+                height: 120px;
+            }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0d121a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #2a3645;
+            border-radius: 8px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3b4b60;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app" id="app">
+        <!-- Header -->
+        <div class="header">
+            <h1>
+                📊 OTC Sim
+                <small>Algo Trading Lab</small>
+            </h1>
+            <div class="header-controls">
+                <label>
+                    Market
+                    <select id="marketSelect">
+                        <option value="V75">V75 (Trend)</option>
+                        <option value="AUS200" selected>AUS200 (Mean‑Revert)</option>
+                        <option value="EURUSD">EUR/USD (Range)</option>
+                    </select>
+                </label>
+                <label>
+                    Speed
+                    <input type="range" id="speedRange" min="1" max="10" value="5" step="1" />
+                    <span id="speedLabel" style="font-size:12px;color:#6f7e93;min-width:28px;">5×</span>
+                </label>
+                <button class="btn-pause active" id="pauseBtn">⏸ Pause</button>
+            </div>
+        </div>
+
+        <!-- Price Strip -->
+        <div class="price-strip" id="priceStrip">
+            <span class="current" id="currentPrice">—</span>
+            <span class="change" id="changePct">+0.00%</span>
+            <span class="stat">High <strong id="highPrice">—</strong></span>
+            <span class="stat">Low <strong id="lowPrice">—</strong></span>
+            <span class="stat">Vol <strong id="volumeDisplay">0</strong></span>
+            <span class="stat">Tick <strong id="tickCount">0</strong></span>
+            <span class="badge" id="marketBadge">AUS200 · Moderate</span>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-grid">
+            <!-- Candlestick Chart -->
+            <div class="chart-box">
+                <div class="chart-label">
+                    📈 Candlestick
+                    <span class="algo-badge">SMA(20) · SMA(50)</span>
+                </div>
+                <div class="chart-container" id="candleChart"></div>
+                <div class="signal-panel" id="signalPanel">
+                    <span class="signal-item">
+                        <span class="dot neutral" id="signalDot"></span>
+                        Signal: <strong id="signalText">—</strong>
+                    </span>
+                    <span class="signal-item">SMA Cross: <strong id="smaCross">—</strong></span>
+                    <span class="signal-item">Trend: <strong id="trendDir">—</strong></span>
+                    <span class="signal-item">RSI: <strong id="rsiValue">—</strong></span>
+                </div>
+            </div>
+
+            <!-- Area Chart -->
+            <div class="chart-box">
+                <div class="chart-label">
+                    📉 Trend Area
+                    <span class="algo-badge">Support · Resistance</span>
+                </div>
+                <div class="chart-container area-chart" id="areaChart"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        //  CONFIGURATION
+        // ============================================================
+        const MARKETS = {
+            V75: {
+                base: 75000,
+                volatility: 2.2,
+                trend: 0.12,
+                meanReversion: 0.002,
+                momentum: 0.35,
+                name: 'V75',
+                desc: 'High volatility · trend-following',
+                color: '#f9a825'
+            },
+            AUS200: {
+                base: 7000,
+                volatility: 0.9,
+                trend: 0.04,
+                meanReversion: 0.015,
+                momentum: 0.20,
+                name: 'AUS200',
+                desc: 'Moderate · mean-reverting',
+                color: '#4f8cff'
+            },
+            EURUSD: {
+                base: 1.1000,
+                volatility: 0.25,
+                trend: 0.005,
+                meanReversion: 0.025,
+                momentum: 0.10,
+                name: 'EUR/USD',
+                desc: 'Low volatility · range-bound',
+                color: '#4caf84'
+            }
+        };
+
+        // ============================================================
+        //  MARKET SIMULATOR
+        // ============================================================
+        class MarketSimulator {
+            constructor(config) {
+                this.config = config;
+                this.price = config.base;
+                this.basePrice = config.base;
+                this.volatility = config.volatility;
+                this.trend = config.trend;
+                this.meanReversion = config.meanReversion;
+                this.momentumFactor = config.momentum;
+
+                this.history = [];
+                this.candles = [];
+                this.currentCandle = null;
+                this.tickCount = 0;
+                this.ticksPerCandle = 30;
+                this.volume = 0;
+                this.high = this.price;
+                this.low = this.price;
+                this.meanPrice = this.price;
+                this.momentum = 0;
+                this.trendDirection = 0;
+
+                // Resistance / Support levels (dynamic)
+                this.resistance = this.price * 1.015;
+                this.support = this.price * 0.985;
+
+                // Start first candle
+                this._openCandle();
+            }
+
+            _openCandle() {
+                const now = Math.floor(Date.now() / 1000);
+                this.currentCandle = {
+                    time: now,
+                    open: this.price,
+                    high: this.price,
+                    low: this.price,
+                    close: this.price,
+                    volume: 0,
+                    tickCount: 0
+                };
+                this.volume = 0;
+            }
+
+            _closeCandle() {
+                if (this.currentCandle) {
+                    this.currentCandle.close = this.price;
+                    this.currentCandle.volume = this.volume;
+                    this.candles.push({ ...this.currentCandle });
+                    // Keep last 500 candles
+                    if (this.candles.length > 500) {
+                        this.candles.shift();
+                    }
+                }
+                this._openCandle();
+            }
+
+            // Generate next tick
+            tick() {
+                // --- Random noise (normal distribution approx) ---
+                const u1 = Math.random(),
+                    u2 = Math.random();
+                const z = Math.sqrt(-2 * Math.log(u1 || 0.0001)) * Math.cos(2 * Math.PI * u2);
+                const noise = z * this.volatility * this.price / 100;
+
+                // --- Trend drift ---
+                const drift = this.trend * this.price / 10000;
+
+                // --- Mean reversion ---
+                const revert = (this.meanPrice - this.price) * this.meanReversion;
+
+                // --- Momentum ---
+                const mom = this.momentum * this.momentumFactor;
+
+                // --- Support / Resistance bounce ---
+                let srBounce = 0;
+                if (this.price > this.resistance) {
+                    srBounce = -this.volatility * this.price / 200;
+                } else if (this.price < this.support) {
+                    srBounce = this.volatility * this.price / 200;
+                }
+
+                // Combine
+                const change = noise + drift + revert + mom + srBounce;
+                this.price += change;
+                this.price = Math.max(this.price, this.basePrice * 0.70);
+                this.price = Math.min(this.price, this.basePrice * 1.30);
+
+                // Update momentum
+                this.momentum = change * 0.3 + this.momentum * 0.7;
+
+                // Update mean
+                this.meanPrice = this.meanPrice * 0.998 + this.price * 0.002;
+
+                // Update support / resistance (dynamic)
+                const range = this.price * 0.018;
+                this.resistance = this.resistance * 0.995 + (this.price + range) * 0.005;
+                this.support = this.support * 0.995 + (this.price - range) * 0.005;
+
+                // Track high/low
+                if (this.price > this.high) this.high = this.price;
+                if (this.price < this.low) this.low = this.price;
+
+                // Track trend direction
+                this.trendDirection = this.trendDirection * 0.9 + (change > 0 ? 1 : -1) * 0.1;
+
+                // Update current candle
+                if (this.currentCandle) {
+                    this.currentCandle.high = Math.max(this.currentCandle.high, this.price);
+                    this.currentCandle.low = Math.min(this.currentCandle.low, this.price);
+                    this.currentCandle.close = this.price;
+                    this.currentCandle.tickCount++;
+                    this.volume += Math.floor(Math.random() * 20 + 5);
+                    this.currentCandle.volume = this.volume;
+                }
+
+                this.tickCount++;
+
+                // Close candle if enough ticks
+                if (this.currentCandle && this.currentCandle.tickCount >= this.ticksPerCandle) {
+                    this._closeCandle();
+                }
+
+                // Store history for area chart
+                this.history.push({ time: Date.now() / 1000, price: this.price });
+                if (this.history.length > 500) this.history.shift();
+
+                return {
+                    price: this.price,
+                    change: change,
+                    high: this.high,
+                    low: this.low,
+                    volume: this.volume,
+                    tick: this.tickCount
+                };
+            }
+
+            // Get candles for charting
+            getCandles(count = 200) {
+                return this.candles.slice(-count);
+            }
+
+            // Get history for area chart
+            getHistory(count = 300) {
+                return this.history.slice(-count);
+            }
+
+            // Reset with new config
+            reset(config) {
+                this.config = config;
+                this.basePrice = config.base;
+                this.price = config.base;
+                this.volatility = config.volatility;
+                this.trend = config.trend;
+                this.meanReversion = config.meanReversion;
+                this.momentumFactor = config.momentum;
+                this.history = [];
+                this.candles = [];
+                this.tickCount = 0;
+                this.high = this.price;
+                this.low = this.price;
+                this.meanPrice = this.price;
+                this.momentum = 0;
+                this.trendDirection = 0;
+                this.resistance = this.price * 1.015;
+                this.support = this.price * 0.985;
+                this.volume = 0;
+                this._openCandle();
+            }
+        }
+
+        // ============================================================
+        //  INDICATOR HELPERS
+        // ============================================================
+        function calcSMA(data, period, field = 'close') {
+            if (data.length < period) return [];
+            const result = [];
+            for (let i = period - 1; i < data.length; i++) {
+                let sum = 0;
+                for (let j = i - period + 1; j <= i; j++) {
+                    sum += data[j][field];
+                }
+                result.push({ time: data[i].time, value: sum / period });
+            }
+            return result;
+        }
+
+        function calcRSI(data, period = 14, field = 'close') {
+            if (data.length < period + 1) return null;
+            let gains = 0,
+                losses = 0;
+            for (let i = data.length - period; i < data.length; i++) {
+                const diff = data[i][field] - data[i - 1][field];
+                if (diff >= 0) gains += diff;
+                else losses -= diff;
+            }
+            const avgGain = gains / period;
+            const avgLoss = losses / period;
+            if (avgLoss === 0) return 100;
+            const rs = avgGain / avgLoss;
+            return 100 - (100 / (1 + rs));
+        }
+
+        function detectSupportResistance(prices, lookback = 30, threshold = 0.005) {
+            if (prices.length < lookback) return { support: null, resistance: null };
+            const slice = prices.slice(-lookback);
+            const min = Math.min(...slice);
+            const max = Math.max(...slice);
+            const range = max - min;
+            if (range === 0) return { support: min, resistance: max };
+            // Find clusters
+            const clusters = [];
+            const sorted = [...slice].sort((a, b) => a - b);
+            let cluster = [sorted[0]];
+            for (let i = 1; i < sorted.length; i++) {
+                if ((sorted[i] - cluster[cluster.length - 1]) / range < threshold) {
+                    cluster.push(sorted[i]);
+                } else {
+                    if (cluster.length > 2) clusters.push({ value: cluster.reduce((a, b) => a + b) / cluster.length, count: cluster
+                            .length });
+                    cluster = [sorted[i]];
+                }
+            }
+            if (cluster.length > 2) clusters.push({ value: cluster.reduce((a, b) => a + b) / cluster.length, count: cluster
+                    .length });
+
+            if (clusters.length < 2) return { support: min, resistance: max };
+            clusters.sort((a, b) => a.value - b.value);
+            const support = clusters[0].value;
+            const resistance = clusters[clusters.length - 1].value;
+            return { support, resistance };
+        }
+
+        // ============================================================
+        //  CHART MANAGER
+        // ============================================================
+        class ChartManager {
+            constructor() {
+                this.candleChart = null;
+                this.areaChart = null;
+                this.candleSeries = null;
+                this.sma20Series = null;
+                this.sma50Series = null;
+                this.areaSeries = null;
+                this.supportLine = null;
+                this.resistanceLine = null;
+                this.volumeSeries = null;
+                this._initCharts();
+            }
+
+            _initCharts() {
+                // --- Candlestick Chart ---
+                const container1 = document.getElementById('candleChart');
+                this.candleChart = LightweightCharts.createChart(container1, {
+                    width: container1.clientWidth,
+                    height: 320,
+                    layout: {
+                        background: { color: '#0d121a' },
+                        textColor: '#6f7e93',
+                    },
+                    grid: {
+                        vertLines: { color: '#1a232e' },
+                        horzLines: { color: '#1a232e' },
+                    },
+                    crosshair: {
+                        mode: LightweightCharts.CrosshairMode.Normal,
+                        vertLine: { color: '#2a3645', width: 1 },
+                        horzLine: { color: '#2a3645', width: 1 },
+                    },
+                    rightPriceScale: { borderColor: '#1a232e' },
+                    timeScale: { borderColor: '#1a232e', timeVisible: true, secondsVisible: true },
+                });
+
+                this.candleSeries = this.candleChart.addCandlestickSeries({
+                    upColor: '#4caf84',
+                    downColor: '#f47b7b',
+                    borderDownColor: '#f47b7b',
+                    borderUpColor: '#4caf84',
+                    wickDownColor: '#f47b7b',
+                    wickUpColor: '#4caf84',
+                    priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+                });
+
+                this.sma20Series = this.candleChart.addLineSeries({
+                    color: '#f9a825',
+                    lineWidth: 2,
+                    priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+                });
+
+                this.sma50Series = this.candleChart.addLineSeries({
+                    color: '#ef6c9d',
+                    lineWidth: 2,
+                    priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+                });
+
+                // --- Area Chart ---
+                const container2 = document.getElementById('areaChart');
+                this.areaChart = LightweightCharts.createChart(container2, {
+                    width: container2.clientWidth,
+                    height: 200,
+                    layout: {
+                        background: { color: '#0d121a' },
+                        textColor: '#6f7e93',
+                    },
+                    grid: {
+                        vertLines: { color: '#1a232e' },
+                        horzLines: { color: '#1a232e' },
+                    },
+                    crosshair: {
+                        mode: LightweightCharts.CrosshairMode.Normal,
+                        vertLine: { color: '#2a3645', width: 1 },
+                        horzLine: { color: '#2a3645', width: 1 },
+                    },
+                    rightPriceScale: { borderColor: '#1a232e' },
+                    timeScale: { borderColor: '#1a232e', timeVisible: true, secondsVisible: true },
+                });
+
+                this.areaSeries = this.areaChart.addAreaSeries({
+                    topColor: 'rgba(79, 140, 255, 0.35)',
+                    bottomColor: 'rgba(79, 140, 255, 0.02)',
+                    lineColor: '#4f8cff',
+                    lineWidth: 2,
+                    priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+                });
+
+                // Support / Resistance lines (will be added as separate series)
+                // We'll manage them as line series
+                this._addSupportResistanceLines();
+
+                // Resize handler
+                const resize = () => {
+                    const w1 = container1.clientWidth;
+                    const w2 = container2.clientWidth;
+                    this.candleChart.applyOptions({ width: w1 });
+                    this.areaChart.applyOptions({ width: w2 });
+                    setTimeout(() => {
+                        this.candleChart.timeScale().fitContent();
+                        this.areaChart.timeScale().fitContent();
+                    }, 100);
+                };
+                window.addEventListener('resize', resize);
+                // Also observe container size changes
+                if (window.ResizeObserver) {
+                    const ro = new ResizeObserver(() => resize());
+                    ro.observe(container1);
+                    ro.observe(container2);
+                }
+            }
+
+            _addSupportResistanceLines() {
+                // We'll create them on demand in update()
+                // Use line series for support/resistance
+            }
+
+            _getOrCreateLine(chart, id, color, style = 2) {
+                // Check if we already have this series stored
+                const key = `_line_${id}`;
+                if (!this[key]) {
+                    this[key] = chart.addLineSeries({
+                        color: color,
+                        lineWidth: 1,
+                        lineStyle: style,
+                        priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+                        crosshairMarkerVisible: false,
+                    });
+                }
+                return this[key];
+            }
+
+            updateCandles(candles, sma20Data, sma50Data) {
+                if (candles.length === 0) return;
+                this.candleSeries.setData(candles);
+                if (sma20Data.length > 0) {
+                    this.sma20Series.setData(sma20Data);
+                }
+                if (sma50Data.length > 0) {
+                    this.sma50Series.setData(sma50Data);
+                }
+                this.candleChart.timeScale().fitContent();
+            }
+
+            updateArea(history, support, resistance) {
+                if (history.length === 0) return;
+                this.areaSeries.setData(history);
+
+                // Update support / resistance lines
+                const supLine = this._getOrCreateLine(this.areaChart, 'support', 'rgba(79, 140, 255, 0.4)', 2);
+                const resLine = this._getOrCreateLine(this.areaChart, 'resistance', 'rgba(244, 123, 123, 0.4)', 2);
+
+                if (support !== null && support !== undefined) {
+                    const supData = history.map(h => ({ time: h.time, value: support }));
+                    supLine.setData(supData);
+                }
+                if (resistance !== null && resistance !== undefined) {
+                    const resData = history.map(h => ({ time: h.time, value: resistance }));
+                    resLine.setData(resData);
+                }
+                this.areaChart.timeScale().fitContent();
+            }
+
+            // Cleanup
+            dispose() {
+                if (this.candleChart) this.candleChart.remove();
+                if (this.areaChart) this.areaChart.remove();
+            }
+        }
+
+        // ============================================================
+        //  MAIN APP
+        // ============================================================
+        class App {
+            constructor() {
+                // DOM refs
+                this.priceEl = document.getElementById('currentPrice');
+                this.changeEl = document.getElementById('changePct');
+                this.highEl = document.getElementById('highPrice');
+                this.lowEl = document.getElementById('lowPrice');
+                this.volumeEl = document.getElementById('volumeDisplay');
+                this.tickEl = document.getElementById('tickCount');
+                this.badgeEl = document.getElementById('marketBadge');
+                this.signalText = document.getElementById('signalText');
+                this.signalDot = document.getElementById('signalDot');
+                this.smaCross = document.getElementById('smaCross');
+                this.trendDir = document.getElementById('trendDir');
+                this.rsiValue = document.getElementById('rsiValue');
+
+                this.marketSelect = document.getElementById('marketSelect');
+                this.speedRange = document.getElementById('speedRange');
+                this.speedLabel = document.getElementById('speedLabel');
+                this.pauseBtn = document.getElementById('pauseBtn');
+
+                // State
+                this.isPaused = false;
+                this.tickInterval = null;
+                this.speed = 5;
+                this.currentMarket = 'AUS200';
+                this.simulator = null;
+                this.chartManager = null;
+                this.updateCount = 0;
+                this.lastCandleUpdate = 0;
+
+                this._init();
+            }
+
+            _init() {
+                // Create simulator with default market
+                const config = MARKETS[this.currentMarket];
+                this.simulator = new MarketSimulator(config);
+                this.chartManager = new ChartManager();
+
+                // Seed initial candles
+                for (let i = 0; i < 80; i++) {
+                    this.simulator.tick();
+                }
+                // Ensure we have candles
+                while (this.simulator.candles.length < 30) {
+                    this.simulator.tick();
+                }
+
+                this._updateUI();
+                this._updateCharts();
+
+                // Event listeners
+                this.marketSelect.addEventListener('change', () => {
+                    this.currentMarket = this.marketSelect.value;
+                    this._resetMarket();
+                });
+
+                this.speedRange.addEventListener('input', () => {
+                    this.speed = parseInt(this.speedRange.value);
+                    this.speedLabel.textContent = this.speed + '×';
+                    this._restartTicker();
+                });
+
+                this.pauseBtn.addEventListener('click', () => {
+                    this.isPaused = !this.isPaused;
+                    this.pauseBtn.textContent = this.isPaused ? '▶ Play' : '⏸ Pause';
+                    this.pauseBtn.classList.toggle('active', !this.isPaused);
+                    if (this.isPaused) {
+                        clearInterval(this.tickInterval);
+                        this.tickInterval = null;
+                    } else {
+                        this._restartTicker();
+                    }
+                });
+
+                // Start ticker
+                this._restartTicker();
+
+                // Initial chart fit
+                setTimeout(() => {
+                    if (this.chartManager) {
+                        this.chartManager.candleChart?.timeScale().fitContent();
+                        this.chartManager.areaChart?.timeScale().fitContent();
+                    }
+                }, 300);
+            }
+
+            _resetMarket() {
+                const config = MARKETS[this.currentMarket];
+                this.simulator.reset(config);
+
+                // Seed new candles
+                for (let i = 0; i < 60; i++) {
+                    this.simulator.tick();
+                }
+                while (this.simulator.candles.length < 20) {
+                    this.simulator.tick();
+                }
+
+                this.lastCandleUpdate = 0;
+                this._updateUI();
+                this._updateCharts();
+
+                if (this.chartManager) {
+                    this.chartManager.candleChart?.timeScale().fitContent();
+                    this.chartManager.areaChart?.timeScale().fitContent();
+                }
+            }
+
+            _restartTicker() {
+                if (this.tickInterval) {
+                    clearInterval(this.tickInterval);
+                    this.tickInterval = null;
+                }
+                if (this.isPaused) return;
+
+                const baseInterval = 60; // ms per tick at speed 1
+                const interval = Math.max(15, Math.floor(baseInterval / this.speed));
+                this.tickInterval = setInterval(() => this._tick(), interval);
+            }
+
+            _tick() {
+                if (this.isPaused) return;
+
+                // Run multiple ticks per frame for higher speed
+                const ticksPerFrame = Math.min(3, Math.ceil(this.speed / 3));
+                for (let i = 0; i < ticksPerFrame; i++) {
+                    this.simulator.tick();
+                }
+
+                this.updateCount++;
+                this._updateUI();
+
+                // Update charts every 4 ticks (smooth but not too often)
+                if (this.updateCount % 3 === 0) {
+                    this._updateCharts();
+                }
+
+                // Update signal panel every 10 ticks
+                if (this.updateCount % 10 === 0) {
+                    this._updateSignals();
+                }
+            }
+
+            _updateUI() {
+                const price = this.simulator.price;
+                const change = price - this.simulator.basePrice;
+                const pct = (change / this.simulator.basePrice) * 100;
+
+                this.priceEl.textContent = price.toFixed(2);
+                this.changeEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+                this.changeEl.className = 'change' + (pct < 0 ? ' negative' : '');
+
+                this.highEl.textContent = this.simulator.high.toFixed(2);
+                this.lowEl.textContent = this.simulator.low.toFixed(2);
+                this.volumeEl.textContent = this.simulator.volume || 0;
+                this.tickEl.textContent = this.simulator.tickCount;
+
+                const cfg = MARKETS[this.currentMarket];
+                this.badgeEl.textContent = cfg.name + ' · ' + cfg.desc;
+                this.badgeEl.style.borderColor = cfg.color;
+            }
+
+            _updateCharts() {
+                const candles = this.simulator.getCandles(200);
+                if (candles.length < 5) return;
+
+                // Format candles for lightweight-charts
+                const formatted = candles.map(c => ({
+                    time: c.time,
+                    open: c.open,
+                    high: c.high,
+                    low: c.low,
+                    close: c.close,
+                    volume: c.volume || 0,
+                }));
+
+                // Calculate SMAs
+                const sma20 = calcSMA(candles, 20);
+                const sma50 = calcSMA(candles, 50);
+
+                const sma20Formatted = sma20.map(d => ({ time: d.time, value: d.value }));
+                const sma50Formatted = sma50.map(d => ({ time: d.time, value: d.value }));
+
+                // Update candlestick chart
+                this.chartManager.updateCandles(formatted, sma20Formatted, sma50Formatted);
+
+                // Area chart
+                const history = this.simulator.getHistory(300);
+                const histFormatted = history.map(h => ({ time: Math.floor(h.time), value: h.price }));
+
+                // Detect support/resistance from history
+                const prices = history.map(h => h.price);
+                const sr = detectSupportResistance(prices, 40, 0.006);
+                this.chartManager.updateArea(histFormatted, sr.support, sr.resistance);
+            }
+
+            _updateSignals() {
+                const candles = this.simulator.getCandles(100);
+                if (candles.length < 30) return;
+
+                const closePrices = candles.map(c => c.close);
+                const lastClose = closePrices[closePrices.length - 1];
+
+                // SMA
+                const sma20 = calcSMA(candles, 20);
+                const sma50 = calcSMA(candles, 50);
+                const lastSMA20 = sma20.length > 0 ? sma20[sma20.length - 1].value : null;
+                const lastSMA50 = sma50.length > 0 ? sma50[sma50.length - 1].value : null;
+
+                // RSI
+                const rsi = calcRSI(candles, 14);
+
+                // Signals
+                let signal = 'NEUTRAL';
+                let dotClass = 'neutral';
+                let crossText = '—';
+
+                if (lastSMA20 !== null && lastSMA50 !== null) {
+                    if (lastSMA20 > lastSMA50) {
+                        crossText = '📈 Bullish (20 > 50)';
+                        if (lastClose > lastSMA20) {
+                            signal = 'BUY';
+                            dotClass = 'buy';
+                        } else {
+                            signal = 'WEAK BUY';
+                            dotClass = 'buy';
+                        }
+                    } else if (lastSMA20 < lastSMA50) {
+                        crossText = '📉 Bearish (20 < 50)';
+                        if (lastClose < lastSMA20) {
+                            signal = 'SELL';
+                            dotClass = 'sell';
+                        } else {
+                            signal = 'WEAK SELL';
+                            dotClass = 'sell';
+                        }
+                    } else {
+                        crossText = '➖ Crossover';
+                    }
+                }
+
+                // RSI signal
+                let rsiText = '—';
+                if (rsi !== null) {
+                    rsiText = rsi.toFixed(1);
+                    if (rsi > 70) rsiText += ' 🔴';
+                    else if (rsi < 30) rsiText += ' 🟢';
+                    else rsiText += ' ⚪';
+                }
+
+                // Trend direction
+                const trend = this.simulator.trendDirection;
+                let trendText = '—';
+                if (trend > 0.15) trendText = '⬆️ Strong Up';
+                else if (trend > 0.05) trendText = '↗️ Up';
+                else if (trend < -0.15) trendText = '⬇️ Strong Down';
+                else if (trend < -0.05) trendText = '↘️ Down';
+                else trendText = '➡️ Sideways';
+
+                // Update DOM
+                this.signalText.textContent = signal;
+                this.signalDot.className = 'dot ' + dotClass;
+                this.smaCross.textContent = crossText;
+                this.trendDir.textContent = trendText;
+                this.rsiValue.textContent = rsiText;
+            }
+        }
+
+        // ============================================================
+        //  BOOT
+        // ============================================================
+        document.addEventListener('DOMContentLoaded', () => {
+            window.app = new App();
+        });
+    </script>
+
+</body>
+</html>

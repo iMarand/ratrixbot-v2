@@ -48,6 +48,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <set>
 #include <optional>
 #include <atomic>
 #include <csignal>
@@ -58,6 +59,9 @@
 #include <filesystem>
 #include <chrono>
 #include <cstdlib>
+#include <cmath>
+#include <cstdio>
+#include <iomanip>
 
 // Helper to parse comma-separated strings
 static std::vector<std::string> parseCsvString(const std::string& s) {
@@ -306,6 +310,13 @@ struct BacktestConfig {
     int cooldownSec = 0;
     std::string csvOut = "backtest_trades.csv";
     int maxConsecLosses = 0; // 0 = no limit; otherwise stop opening new trades after N losses in a row
+    // Multiplier-contract backtest (Boom/Crash etc. have NO rise/fall, only multipliers)
+    bool   useMultiplier = false;
+    int    multiplier = 100;     // contract multiplier
+    double tpAmount = 0.0;       // take profit in account currency (0 = none)
+    double slAmount = 0.0;       // stop loss in account currency (0 = none; capped at stake anyway)
+    int    maxHoldSec = 60;      // close the position after this many seconds if not TP/SL
+    double commissionPct = 0.0;  // multiplier commission as % of (stake*multiplier) notional, round-trip
 };
 
 struct BacktestResult {
@@ -639,6 +650,87 @@ void analyzeHorizons(const std::vector<int64_t>& times,
     std::cout << "Reading: a high 'rescued losers' count at a longer horizon means\n"
               << "your entries are right but the contract expires too soon.\n"
               << "------------------------------------------------------------\n";
+}
+
+// ============================================================================
+// Multiplier-contract backtest (for Boom/Crash etc. that have NO rise/fall).
+// Models MULTUP/MULTDOWN: unrealized P&L = stake * multiplier * (favourable %
+// move). Loss is capped at the stake (Deriv stops you out at -100%). Closes on
+// take-profit, stop-loss, or max hold time. One position at a time; every tick
+// is still fed to the strategy so its indicators/candles stay in sync.
+// ============================================================================
+BacktestResult runMultiplierBacktest(const BacktestConfig& cfg,
+                            const std::vector<int64_t>& times,
+                            const std::vector<double>& prices,
+                            std::function<Signal(int64_t, double)> strategyFn,
+                            std::vector<Trade>* outTrades = nullptr) {
+    std::ofstream csv(cfg.csvOut);
+    csv << "entry_time,entry_price,exit_time,exit_price,direction,won,pnl\n";
+
+    size_t n = prices.size();
+    double equity = 0, peak = 0, maxDD = 0;
+    int total = 0, wins = 0, streak = 0, maxStreak = 0, currentConsec = 0;
+    int skipped = 0;
+
+    bool inPos = false;
+    bool up = true;
+    double entry = 0; int64_t entryTime = 0; size_t entryIdx = 0;
+    double commission = cfg.stake * cfg.multiplier * cfg.commissionPct / 100.0;
+    std::vector<Trade> trades;
+
+    auto closeTrade = [&](double pnl, int64_t xTime, double xPrice) {
+        pnl -= commission;
+        bool won = pnl > 0;
+        equity += pnl; peak = std::max(peak, equity); maxDD = std::min(maxDD, equity - peak);
+        total++;
+        if (won) { wins++; currentConsec = 0; streak = 0; }
+        else { currentConsec++; streak++; maxStreak = std::max(maxStreak, streak); }
+        csv << entryTime << "," << entry << "," << xTime << "," << xPrice << ","
+            << (up ? "MULTUP" : "MULTDOWN") << "," << (won ? 1 : 0) << "," << pnl << "\n";
+        Trade t; t.entryIdx = entryIdx; t.entryTime = entryTime; t.entryPrice = entry;
+        t.exitTime = xTime; t.exitPrice = xPrice; t.direction = up ? Direction::Rise : Direction::Fall;
+        t.won = won; t.pnl = pnl; trades.push_back(t);
+        inPos = false;
+    };
+
+    for (size_t i = 0; i < n; i++) {
+        Signal sig = strategyFn(times[i], prices[i]); // always feed, keeps state in sync
+
+        if (inPos) {
+            double move = prices[i] - entry; if (!up) move = -move;
+            double cur = cfg.stake * cfg.multiplier * (move / entry); // unrealized $
+            double stopOut = -cfg.stake;                              // multiplier cap
+            double effSL = (cfg.slAmount > 0) ? -cfg.slAmount : stopOut;
+            if (effSL < stopOut) effSL = stopOut;
+            if (cur <= effSL)                                  closeTrade(effSL, times[i], prices[i]);
+            else if (cfg.tpAmount > 0 && cur >= cfg.tpAmount)  closeTrade(cfg.tpAmount, times[i], prices[i]);
+            else if ((int)(times[i] - entryTime) >= cfg.maxHoldSec) closeTrade(cur, times[i], prices[i]);
+            continue;
+        }
+
+        if (sig == Signal::None) continue;
+        if (cfg.maxConsecLosses > 0 && currentConsec >= cfg.maxConsecLosses) { skipped++; continue; }
+        inPos = true; up = (sig == Signal::Rise);
+        entry = prices[i]; entryTime = times[i]; entryIdx = i;
+    }
+    csv.close();
+
+    std::cout << "\n--- Last " << std::min((int)trades.size(), 20) << " Multiplier Trades ---\n";
+    for (int k = std::max(0, (int)trades.size() - 20); k < (int)trades.size(); k++) {
+        const auto& t = trades[k];
+        std::cout << (t.direction == Direction::Rise ? "MULTUP " : "MULTDOWN ")
+                  << t.entryPrice << " -> " << t.exitPrice
+                  << " | " << (t.won ? "WIN" : "LOSS") << " pnl=$" << t.pnl << "\n";
+    }
+    std::cout << "----------------------------------\n";
+
+    BacktestResult r;
+    r.totalTrades = total; r.wins = wins; r.losses = total - wins;
+    r.netPnl = equity; r.maxDrawdown = maxDD;
+    r.winRatePct = total > 0 ? 100.0 * wins / total : 0.0;
+    r.maxConsecLossStreak = maxStreak; r.tradesSkippedByRiskControl = skipped;
+    if (outTrades) *outTrades = trades;
+    return r;
 }
 
 void printBacktestSummary(const BacktestConfig& cfg, const BacktestResult& r) {
@@ -1114,7 +1206,63 @@ struct ActiveSymbolInfo {
     std::string displayName;
     std::string market;
     std::string submarket;
+    double      pip = 0.0;
 };
+
+// Get the REAL payout for a 1-tick digit contract (no auth needed; it's a quote).
+// Returns total payout for a $1 stake on a win, or -1 on failure.
+double fetchDigitPayout(DerivWsClient& client, const std::string& sym,
+                        const std::string& type, int barrier) {
+    json req = {
+        {"proposal", 1}, {"amount", 1.0}, {"basis", "stake"},
+        {"contract_type", type}, {"currency", "USD"},
+        {"duration", 1}, {"duration_unit", "t"},
+        {"symbol", sym}, {"barrier", std::to_string(barrier)}
+    };
+    if (!client.sendText(req.dump())) return -1.0;
+    std::string raw;
+    for (int k = 0; k < 25; k++) {
+        if (!client.receiveText(raw)) return -1.0;
+        json r;
+        try { r = json::parse(raw); } catch (...) { continue; }
+        if (r.contains("error")) return -1.0;
+        if (r.value("msg_type", "") == "proposal") return r["proposal"].value("payout", 0.0);
+    }
+    return -1.0;
+}
+
+// Real payout for a touch/no-touch contract at a relative barrier (e.g. "+15.50"),
+// 2-minute duration. Returns total $ payout for $1 stake on win, or -1 on failure.
+double fetchTouchPayout(DerivWsClient& client, const std::string& sym,
+                        const std::string& type, const std::string& barrier,
+                        double* outActualOffset = nullptr) {
+    json req = {
+        {"proposal", 1}, {"amount", 1.0}, {"basis", "stake"},
+        {"contract_type", type}, {"currency", "USD"},
+        {"duration", 2}, {"duration_unit", "m"},
+        {"symbol", sym}, {"barrier", barrier}
+    };
+    if (!client.sendText(req.dump())) return -1.0;
+    std::string raw;
+    for (int k = 0; k < 25; k++) {
+        if (!client.receiveText(raw)) return -1.0;
+        json r;
+        try { r = json::parse(raw); } catch (...) { continue; }
+        if (r.contains("error")) return -1.0;
+        if (r.value("msg_type", "") == "proposal") {
+            auto& p = r["proposal"];
+            if (outActualOffset) {
+                // Deriv echoes the actual barrier (absolute) and spot it used.
+                double spot = p.value("spot", 0.0);
+                double bar = 0.0;
+                if (p.contains("barrier")) { try { bar = std::stod(p["barrier"].get<std::string>()); } catch (...) {} }
+                if (spot > 0 && bar > 0) *outActualOffset = std::fabs(bar - spot);
+            }
+            return p.value("payout", 0.0);
+        }
+    }
+    return -1.0;
+}
 
 bool fetchActiveSymbols(DerivWsClient& client, std::vector<ActiveSymbolInfo>& out) {
     json req = { {"active_symbols", "brief"}, {"product_type", "basic"} };
@@ -1140,6 +1288,7 @@ bool fetchActiveSymbols(DerivWsClient& client, std::vector<ActiveSymbolInfo>& ou
         info.displayName = s.value("display_name", "");
         info.market = s.value("market", "");
         info.submarket = s.value("submarket", "");
+        info.pip = s.value("pip", 0.0);
         out.push_back(info);
     }
     return true;
@@ -1303,6 +1452,12 @@ int main(int argc, char** argv) {
     int    multiplier = 100;
     double slAmount = 0.0, tpAmount = 0.0, beAmount = 0.0, trailAmount = 0.0;
     double dailyLoss = 0.0;
+    std::string contractType = "binary"; // backtest: binary | multiplier
+    int    maxHoldSec = 60;
+    double martFactor = 2.2;  // martingale stake multiplier after a loss
+    int    martCap = 7;       // consecutive losses counted as a full-loss bust, then reset
+    double martBase = 1.0;    // base stake
+    double volMult = 0.0;     // volatility cooldown: trade only when short vol <= volMult*baseline (0=off)
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -1356,12 +1511,23 @@ int main(int argc, char** argv) {
         else if (arg == "--spread") { spreadPips = std::stod(next()); }
         else if (arg == "--token") { apiToken = next(); }
         else if (arg == "--multiplier") { multiplier = std::stoi(next()); }
+        else if (arg == "--contract") { contractType = next(); }
+        else if (arg == "--max-hold") { maxHoldSec = std::stoi(next()); }
         else if (arg == "--sl-amount") { slAmount = std::stod(next()); }
         else if (arg == "--tp-amount") { tpAmount = std::stod(next()); }
         else if (arg == "--be-amount") { beAmount = std::stod(next()); }
         else if (arg == "--trail-amount") { trailAmount = std::stod(next()); }
         else if (arg == "--daily-loss") { dailyLoss = std::stod(next()); }
         else if (arg == "--list-symbols") { mode = "list-symbols"; }
+        else if (arg == "--contracts-for") { mode = "contracts-for"; symbolAlias = next(); }
+        else if (arg == "--digit-stats") { mode = "digit-stats"; symbolAlias = next(); }
+        else if (arg == "--digit-backtest") { mode = "digit-backtest"; symbolAlias = next(); }
+        else if (arg == "--digit-martingale") { mode = "digit-martingale"; symbolAlias = next(); }
+        else if (arg == "--touch-backtest") { mode = "touch-backtest"; symbolAlias = next(); }
+        else if (arg == "--mart-factor") { martFactor = std::stod(next()); }
+        else if (arg == "--mart-cap") { martCap = std::stoi(next()); }
+        else if (arg == "--base") { martBase = std::stod(next()); }
+        else if (arg == "--vol-mult") { volMult = std::stod(next()); }
         else if (arg == "--help") { printUsage(); return 0; }
         else { std::cerr << "Unknown argument: " << arg << "\n"; printUsage(); return 1; }
     }
@@ -1382,8 +1548,8 @@ int main(int argc, char** argv) {
 
     if (mode == "backtest" || mode == "paper" || mode == "live") {
         if ((mode == "backtest" || mode == "paper") &&
-            duration != 10 && duration != 15 && duration != 30 && duration != 60) {
-            std::cerr << "This tool is scoped to 10s/15s/30s/60s durations only. Got: " << duration << "\n";
+            (duration < 5 || duration > 600)) {
+            std::cerr << "Duration must be between 5 and 600 seconds. Got: " << duration << "\n";
             return 1;
         }
         if (loadRunId.empty()) {
@@ -1424,6 +1590,263 @@ int main(int argc, char** argv) {
             return 1;
         }
         printSymbolList(symbols);
+        return 0;
+    }
+
+    if (mode == "touch-backtest") {
+        std::string sym = resolveSymbol(symbolAlias);
+        std::vector<ActiveSymbolInfo> symbols; double pip = 0.0;
+        if (fetchActiveSymbols(client, symbols))
+            for (auto& s : symbols) if (s.symbol == sym) { pip = s.pip; break; }
+        if (pip <= 0.0) { std::cerr << "no pip size for " << sym << "\n"; return 1; }
+        int dec = 0; { double pp = pip; while (pp < 1.0 && dec < 8) { pp *= 10; dec++; } }
+
+        std::vector<int64_t> times; std::vector<double> prices;
+        std::cout << "Fetching " << count << " ticks for " << sym << " ...\n";
+        if (!fetchTickHistory(client, sym, count, times, prices)) { std::cerr << "fetch failed\n"; return 1; }
+        size_t n = prices.size();
+        const int DUR = 120; // 2 minutes
+
+        // Typical 2-min absolute excursion (median), to scale sensible barriers.
+        std::vector<double> exc;
+        for (size_t i = 0; i + 1 < n; i += 30) {
+            double e = prices[i], mx = 0;
+            for (size_t j = i + 1; j < n && times[j] <= times[i] + DUR; j++)
+                mx = std::max(mx, std::fabs(prices[j] - e));
+            if (mx > 0) exc.push_back(mx);
+        }
+        if (exc.size() < 20) { std::cerr << "not enough data\n"; return 1; }
+        std::sort(exc.begin(), exc.end());
+        double B = exc[exc.size()/2]; // median 2-min excursion
+
+        std::cout << "\n=== TOUCH / NO-TOUCH 2-min backtest on " << sym << " (" << n
+                  << " ticks, stake $1, REAL payouts; median 2-min move=" << std::fixed
+                  << std::setprecision(dec) << B << ") ===\n";
+        printf("%-9s %-9s %-9s %-7s %-7s %-8s %-9s %s\n",
+               "TYPE","REQ_OFF","ACT_OFF","TRADES","WIN%","PAYOUT","NET_PNL","EV/trade");
+
+        double mults[3] = {0.5, 1.0, 1.5};
+        const char* types[2] = {"NOTOUCH", "ONETOUCH"};
+        for (int ti = 0; ti < 2; ti++) {
+            for (int mi = 0; mi < 3; mi++) {
+                double reqOff = llround((B * mults[mi]) / pip) * pip; // snap to pip
+                char bs[32]; snprintf(bs, sizeof(bs), "%+.*f", dec, reqOff);
+                double actOff = reqOff;
+                double payout = fetchTouchPayout(client, sym, types[ti], bs, &actOff);
+                if (payout <= 0.0) { printf("%-9s %-9s (payout unavailable)\n", types[ti], bs); continue; }
+                // SIMULATE AGAINST DERIV'S ACTUAL BARRIER, not the requested one.
+                double off = (actOff > 0 ? actOff : reqOff);
+                bool noTouch = (ti == 0);
+                long trades = 0, wins = 0; double pnl = 0;
+                for (size_t i = 0; i + 1 < n; i += 10) {
+                    double e = prices[i]; bool touched = false;
+                    for (size_t j = i + 1; j < n && times[j] <= times[i] + DUR; j++)
+                        if (prices[j] - e >= off) { touched = true; break; }
+                    bool win = noTouch ? !touched : touched;
+                    trades++; if (win) { wins++; pnl += payout - 1.0; } else pnl -= 1.0;
+                }
+                double wr = trades ? 100.0*wins/trades : 0;
+                double ev = trades ? pnl/trades : 0;
+                char ro[24], ao[24];
+                snprintf(ro, sizeof(ro), "%.*f", dec, reqOff);
+                snprintf(ao, sizeof(ao), "%.*f", dec, off);
+                printf("%-9s %-9s %-9s %-7ld %-6.2f%% %-8.3f %+-9.1f %+.4f\n",
+                       types[ti], ro, ao, trades, wr, payout, pnl, ev);
+            }
+        }
+        std::cout << "\nREQ_OFF = barrier I asked for; ACT_OFF = barrier Deriv actually used.\n"
+                  << "If they differ, the earlier 'edge' was that mismatch. EV/trade<0 => no edge.\n";
+        return 0;
+    }
+
+    if (mode == "digit-martingale") {
+        std::string sym = resolveSymbol(symbolAlias);
+        std::vector<ActiveSymbolInfo> symbols; double pip = 0.0;
+        if (fetchActiveSymbols(client, symbols))
+            for (auto& s : symbols) if (s.symbol == sym) { pip = s.pip; break; }
+        if (pip <= 0.0) { std::cerr << "no pip size for " << sym << "\n"; return 1; }
+
+        std::vector<int64_t> times; std::vector<double> prices;
+        std::cout << "Fetching " << count << " ticks for " << sym << " (FRESH market data) ...\n";
+        if (!fetchTickHistory(client, sym, count, times, prices)) { std::cerr << "fetch failed\n"; return 1; }
+        size_t n = prices.size();
+        std::vector<int> dig(n);
+        for (size_t i = 0; i < n; i++) dig[i] = (int)((((long long)llround(prices[i]/pip)) % 10 + 10) % 10);
+
+        // Volatility-adaptive cooldown: short-term volatility per tick, vs baseline.
+        const int VW = 20;
+        std::vector<double> shortVol(n, 0.0);
+        if (volMult > 0.0) {
+            std::vector<double> ret(n, 0.0);
+            for (size_t i = 1; i < n; i++) ret[i] = (prices[i] - prices[i-1]) / prices[i-1];
+            for (size_t i = VW; i < n; i++) {
+                double m = 0; for (int k = 0; k < VW; k++) m += ret[i-k]; m /= VW;
+                double v = 0; for (int k = 0; k < VW; k++) { double dd = ret[i-k]-m; v += dd*dd; }
+                shortVol[i] = std::sqrt(v / VW);
+            }
+        }
+        double volBaseline = 0.0;
+        if (volMult > 0.0) {
+            std::vector<double> tmp(shortVol.begin()+VW, shortVol.end());
+            std::sort(tmp.begin(), tmp.end());
+            volBaseline = tmp.empty() ? 0.0 : tmp[tmp.size()/2]; // median
+        }
+
+        // cost of one full martingale bust (base * (1 + f + ... + f^(cap-1)))
+        double bustCost = 0, s = martBase; for (int k = 0; k < martCap; k++) { bustCost += s; s *= martFactor; }
+
+        std::cout << "\n=== DIGIT MARTINGALE on " << sym << " (" << n << " ticks) | base=$"
+                  << std::fixed << std::setprecision(2) << martBase << ", factor=" << martFactor
+                  << ", bust at " << martCap << " losses (=$" << bustCost << "/bust)"
+                  << (volMult > 0 ? " | VOL-COOLDOWN on" : "") << " ===\n";
+        printf("%-10s %-3s %-7s %-7s %-6s %-6s %-9s %-9s %-10s %s\n",
+               "TYPE","BAR","TRADES","WINS","LOSS","BUSTS","MAX_STAKE","NET_PNL","MAX_DD","SKIPPED");
+
+        struct Cfg { const char* type; int bar; };
+        Cfg cfgs[2] = { {"DIGITUNDER", 8}, {"DIGITOVER", 1} };
+        for (auto& c : cfgs) {
+            double payout = fetchDigitPayout(client, sym, c.type, c.bar);
+            if (payout <= 0.0) { printf("%-10s %-3d (payout unavailable)\n", c.type, c.bar); continue; }
+            bool under = (std::string(c.type) == "DIGITUNDER");
+            double stake = martBase, equity = 0, peak = 0, maxDD = 0, maxStake = martBase;
+            long trades = 0, wins = 0, skipped = 0; int consec = 0, busts = 0;
+            for (size_t i = 0; i + 1 < n; i++) {
+                // volatility cooldown: wait for calm before placing the (next) bet
+                if (volMult > 0.0 && i >= (size_t)VW && shortVol[i] > volMult * volBaseline) { skipped++; continue; }
+                int d = dig[i+1];
+                bool win = under ? (d < c.bar) : (d > c.bar);
+                trades++;
+                maxStake = std::max(maxStake, stake);
+                if (win) { equity += stake * (payout - 1.0); wins++; stake = martBase; consec = 0; }
+                else {
+                    equity -= stake; consec++;
+                    if (consec >= martCap) { busts++; stake = martBase; consec = 0; }
+                    else stake *= martFactor;
+                }
+                peak = std::max(peak, equity); maxDD = std::min(maxDD, equity - peak);
+            }
+            printf("%-10s %-3d %-7ld %-7ld %-6ld %-6d %-9.1f %+-9.1f %-10.1f %ld\n",
+                   c.type, c.bar, trades, wins, trades - wins, busts, maxStake, equity, maxDD, skipped);
+        }
+        std::cout << "\nbust = " << martCap << "-loss streak (=$" << bustCost
+                  << "), then reset to base. SKIPPED = bets withheld by the volatility cooldown.\n";
+        return 0;
+    }
+
+    if (mode == "digit-backtest") {
+        std::string sym = resolveSymbol(symbolAlias);
+        std::vector<ActiveSymbolInfo> symbols; double pip = 0.0;
+        if (fetchActiveSymbols(client, symbols))
+            for (auto& s : symbols) if (s.symbol == sym) { pip = s.pip; break; }
+        if (pip <= 0.0) { std::cerr << "no pip size for " << sym << "\n"; return 1; }
+
+        std::vector<int64_t> times; std::vector<double> prices;
+        std::cout << "Fetching " << count << " ticks for " << sym << " (pip=" << pip << ") ...\n";
+        if (!fetchTickHistory(client, sym, count, times, prices)) { std::cerr << "fetch failed\n"; return 1; }
+        size_t n = prices.size();
+        std::vector<int> dig(n);
+        for (size_t i = 0; i < n; i++) dig[i] = (int)((((long long)llround(prices[i]/pip)) % 10 + 10) % 10);
+
+        std::cout << "\n=== DIGIT OVER/UNDER 1-tick backtest on " << sym
+                  << " (" << n << " ticks, stake $1, REAL Deriv payouts) ===\n";
+        printf("%-10s %-3s %-7s %-7s %-7s %-8s %-9s %-9s %s\n",
+               "TYPE","BAR","TRADES","WINS","LOSS","WIN%","PAYOUT","NET_PNL","LOSS_STREAK");
+        const char* types[2] = {"DIGITUNDER","DIGITOVER"};
+        for (int ti = 0; ti < 2; ti++) {
+            bool under = (ti == 0);
+            for (int b = 1; b <= 8; b++) {
+                double payout = fetchDigitPayout(client, sym, types[ti], b);
+                if (payout <= 0.0) { printf("%-10s %-3d  (payout unavailable)\n", types[ti], b); continue; }
+                long trades = 0, wins = 0; double pnl = 0; int streak = 0, maxStreak = 0;
+                for (size_t i = 0; i + 1 < n; i++) {
+                    int d = dig[i+1]; // settles on next tick
+                    bool win = under ? (d < b) : (d > b);
+                    trades++;
+                    if (win) { wins++; pnl += (payout - 1.0); streak = 0; }
+                    else     { pnl -= 1.0; streak++; if (streak > maxStreak) maxStreak = streak; }
+                }
+                double wr = trades ? 100.0*wins/trades : 0;
+                printf("%-10s %-3d %-7ld %-7ld %-7ld %-7.2f%% %-8.3f %+-9.1f %d\n",
+                       types[ti], b, trades, wins, trades-wins, wr, payout, pnl, maxStreak);
+            }
+        }
+        std::cout << "\nNET_PNL over ~" << n << " $1 trades. Positive only if a barrier's real\n"
+                  << "win rate beats its payout-implied breakeven (uniform digits => ~0/negative).\n";
+        return 0;
+    }
+
+    if (mode == "digit-stats") {
+        std::string sym = resolveSymbol(symbolAlias);
+        // get pip size for this symbol
+        std::vector<ActiveSymbolInfo> symbols;
+        double pip = 0.0;
+        if (fetchActiveSymbols(client, symbols)) {
+            for (auto& s : symbols) if (s.symbol == sym) { pip = s.pip; break; }
+        }
+        if (pip <= 0.0) { std::cerr << "Could not get pip size for " << sym << " (digit contracts need it).\n"; return 1; }
+
+        std::vector<int64_t> times; std::vector<double> prices;
+        std::cout << "Fetching " << count << " ticks for " << sym << " (pip=" << pip << ") ...\n";
+        if (!fetchTickHistory(client, sym, count, times, prices)) { std::cerr << "fetch failed\n"; return 1; }
+
+        long digitCount[10] = {0}; long n = 0;
+        for (double p : prices) {
+            long long pips = llround(p / pip);
+            int d = (int)(((pips % 10) + 10) % 10);
+            digitCount[d]++; n++;
+        }
+        if (n == 0) { std::cerr << "no ticks\n"; return 1; }
+
+        std::cout << "\n=== Last-digit distribution for " << sym << " (" << n << " ticks) ===\n";
+        std::cout << "digit :  count   pct    (uniform = 10.00%)\n";
+        double chi2 = 0.0, expv = n / 10.0;
+        for (int d = 0; d < 10; d++) {
+            double pct = 100.0 * digitCount[d] / n;
+            chi2 += (digitCount[d] - expv) * (digitCount[d] - expv) / expv;
+            char bar[64]; int blen = (int)(pct); if (blen > 40) blen = 40;
+            std::string b(blen, '#');
+            printf("  %d   : %7ld  %5.2f%%  %s\n", d, digitCount[d], pct, b.c_str());
+        }
+        std::cout << "Chi-square vs uniform: " << chi2 << " (df=9; >16.9 = biased at 95%, >21.7 at 99%)\n";
+
+        std::cout << "\n=== Over/Under win rates (1 tick) — need to beat the contract's implied % ===\n";
+        std::cout << "barrier | UNDER b wins (digit<b) | OVER b wins (digit>b)\n";
+        for (int b = 1; b <= 8; b++) {
+            long under = 0, over = 0;
+            for (int d = 0; d < 10; d++) { if (d < b) under += digitCount[d]; if (d > b) over += digitCount[d]; }
+            printf("   %d    |  %5.2f%% (fair %d0%%)      |  %5.2f%% (fair %d0%%)\n",
+                   b, 100.0*under/n, b, 100.0*over/n, 9-b);
+        }
+        std::cout << "\nIf a column clearly EXCEEDS its 'fair %', that digit barrier may have a real edge.\n";
+        return 0;
+    }
+
+    if (mode == "contracts-for") {
+        std::string sym = resolveSymbol(symbolAlias);
+        std::cout << "Querying contracts available for " << sym << " ...\n";
+        if (!client.sendText(json({{"contracts_for", sym}, {"currency", "USD"}}).dump())) return 1;
+        std::string raw;
+        if (!client.receiveText(raw)) return 1;
+        json resp;
+        try { resp = json::parse(raw); } catch (...) { std::cerr << "parse error\n"; return 1; }
+        if (resp.contains("error")) { std::cerr << "Deriv: " << resp["error"].value("message","error") << "\n"; return 1; }
+        if (!resp.contains("contracts_for")) { std::cerr << "no contracts_for in response\n"; return 1; }
+        std::set<std::string> cats, types, durations;
+        for (auto& a : resp["contracts_for"]["available"]) {
+            std::string cat = a.value("contract_category_display", a.value("contract_category",""));
+            if (!cat.empty()) cats.insert(cat);
+            std::string t = a.value("contract_type",""); if(!t.empty()) types.insert(t);
+            std::string mn = a.value("min_contract_duration",""), mx = a.value("max_contract_duration","");
+            if(!mn.empty()) durations.insert(mn + "-" + mx);
+        }
+        std::cout << "\n=== Contracts available for " << sym << " ===\n";
+        std::cout << "Categories: "; for (auto& c : cats) std::cout << "[" << c << "] "; std::cout << "\n";
+        std::cout << "Types:      "; for (auto& t : types) std::cout << t << " "; std::cout << "\n";
+        std::cout << "Durations:  "; for (auto& d : durations) std::cout << d << " "; std::cout << "\n";
+        bool hasRiseFall = types.count("CALL") || types.count("PUT");
+        bool hasMult = types.count("MULTUP") || types.count("MULTDOWN");
+        std::cout << "\nRise/Fall (CALL/PUT): " << (hasRiseFall ? "YES" : "NO")
+                  << "   |   Multipliers (MULTUP/MULTDOWN): " << (hasMult ? "YES" : "NO") << "\n";
         return 0;
     }
 
@@ -1614,6 +2037,11 @@ int main(int argc, char** argv) {
         cfg.tpPips = tpPips;
         cfg.slPips = slPips;
         cfg.lotSize = lotSize;
+        cfg.useMultiplier = (contractType == "multiplier");
+        cfg.multiplier = multiplier;
+        cfg.tpAmount = tpAmount;
+        cfg.slAmount = slAmount;
+        cfg.maxHoldSec = maxHoldSec;
         if (!csvOut.empty()) cfg.csvOut = csvOut;
 
         std::vector<int64_t> times;
@@ -1626,12 +2054,18 @@ int main(int argc, char** argv) {
         std::cout << "Fetched " << prices.size() << " ticks. Running backtest...\n";
 
         std::vector<Trade> trades;
-        BacktestResult result = runBacktest(cfg, times, prices, strategyFn, &trades);
-        printBacktestSummary(cfg, result);
-
-        // Only meaningful for duration-based (synthetic) exits, not TP/SL.
-        bool usedTPSL = isForexOrCommodity(cfg.symbol) && cfg.tpPips > 0 && cfg.slPips > 0;
-        if (!usedTPSL) analyzeHorizons(times, prices, trades, cfg);
+        if (cfg.useMultiplier) {
+            std::cout << "Contract: MULTIPLIER x" << cfg.multiplier
+                      << " | TP=$" << cfg.tpAmount << " SL=$" << cfg.slAmount
+                      << " maxHold=" << cfg.maxHoldSec << "s\n";
+            BacktestResult result = runMultiplierBacktest(cfg, times, prices, strategyFn, &trades);
+            printBacktestSummary(cfg, result);
+        } else {
+            BacktestResult result = runBacktest(cfg, times, prices, strategyFn, &trades);
+            printBacktestSummary(cfg, result);
+            bool usedTPSL = isForexOrCommodity(cfg.symbol) && cfg.tpPips > 0 && cfg.slPips > 0;
+            if (!usedTPSL) analyzeHorizons(times, prices, trades, cfg);
+        }
 
         if (confStrat) {
             auto& d = confStrat->diagnostics();

@@ -1,12 +1,22 @@
-# Deriv Boom/Crash — the 98.5% strategies (Random Forest & XGBoost)
+# Deriv Boom/Crash — Random Forest & XGBoost study
 
-This folder bundles the ONLY strategies in the whole project that showed a real,
-robust, out-of-sample edge: **Random Forest** and **XGBoost** (self-training,
-candle-aware) traded on Deriv's **Boom 1000 / Crash 1000** synthetic indices,
-backtested on **Deriv API tick data** via the `derivbot` C++ tool.
+> ⚠️ **CORRECTION / CONCLUSION (read first).** The headline "98.5% win rate,
+> +$1,700" below was backtested as a **Rise/Fall (binary)** contract — but the
+> Deriv API confirms **Boom/Crash have NO Rise/Fall, only Multipliers &
+> Accumulators**. So that binary result is for a **contract that does not exist**
+> for these symbols. On the **real contract (multipliers)** the same drift
+> strategy is **~zero P&L** (−$0.13 to +$0.29 over ~849 trades, ×100, before
+> commission → net negative after). Boom/Crash are engineered to be ~zero-EV
+> (the drift is exactly offset by the spike), so leveraged "fair" exposure has
+> no edge. **There is no tradeable edge here.** The folder is kept as a record
+> of the method and the lesson.
 
-> They produced ~**98.5–99.5% win rate** and scaled linearly with more data
-> (robust, not curve-fit). v75 and gold showed NO edge by contrast.
+This folder bundles **Random Forest** and **XGBoost** (self-training,
+candle-aware), tested on Deriv's **Boom 1000 / Crash 1000** via the `derivbot`
+C++ tool on **Deriv API tick data**.
+
+> Binary backtest: ~98.5–99.5% win rate (INVALID — see correction above).
+> Multiplier backtest (the real contract): ~breakeven/negative. v75 & gold: no edge.
 
 ---
 
@@ -32,6 +42,23 @@ pnl = won ? (stake * payoutPct) : -stake;          // payoutPct = 0.95
 
 This is **binary**. It is NOT the multiplier (MULTUP/MULTDOWN) contract used by
 `derivbot --mode live`. The 98.5% result belongs to **rise/fall binary** only.
+
+### Exact settings used (no SL/TP anywhere)
+- **Contract:** Rise/Fall binary. **No stop-loss, no take-profit** — TP/SL only
+  applies to forex/commodity symbols, not synthetics like Boom/Crash.
+- **Trade duration:** **15 seconds** (`--duration 15`). Exit = first tick at
+  `entry time + 15s`, then win/lose.
+- **Candle period (model timeframe):** **15 seconds** — the ML builds 15s OHLC
+  candles from ticks and predicts on each.
+- **Self-training label:** did price rise over the next 15s after the candle.
+- **Random Forest:** 30 trees, max-depth 4, min-samples 10, vote ≥ 0.67.
+- **XGBoost:** 40 rounds, max-depth 3, learning-rate 0.10, prob-margin 0.10.
+- **Spacing:** ~2-candle cooldown between trades; one position at a time.
+- Stake $1, payout 0.95.
+
+In plain terms: **15s candles → ML predicts direction → 15s Rise/Fall bet → settle
+win/lose at expiry.** On Boom it bets Fall ~99% of the time (the drift); on Crash
+it bets Rise.
 
 ---
 
